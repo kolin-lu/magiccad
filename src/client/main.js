@@ -9,8 +9,14 @@ const el = {
   input: $("#input"),
   send: $("#send"),
   examples: $("#examples"),
+  providerSelect: $("#provider-select"),
+  anthropicSettings: $("#anthropic-settings"),
+  openaiSettings: $("#openai-settings"),
   modelSelect: $("#model-select"),
   apiKey: $("#api-key"),
+  openaiBaseUrl: $("#openai-base-url"),
+  openaiModel: $("#openai-model"),
+  openaiKey: $("#openai-key"),
   keyHint: $("#key-hint"),
   viewport: $("#viewport"),
   codePanel: $("#code-panel"),
@@ -34,28 +40,73 @@ const state = {
 
 // ---------- 设置（localStorage 持久化） ----------
 
-el.apiKey.value = localStorage.getItem("magiccad.apiKey") || "";
-el.apiKey.addEventListener("change", () => {
-  localStorage.setItem("magiccad.apiKey", el.apiKey.value.trim());
+let serverConfig = null;
+
+function bindSetting(input, key) {
+  input.value = localStorage.getItem(key) || "";
+  input.addEventListener("change", () => {
+    localStorage.setItem(key, input.value.trim());
+  });
+}
+
+bindSetting(el.apiKey, "magiccad.apiKey");
+bindSetting(el.openaiBaseUrl, "magiccad.openai.baseUrl");
+bindSetting(el.openaiModel, "magiccad.openai.model");
+bindSetting(el.openaiKey, "magiccad.openai.apiKey");
+
+el.providerSelect.value = localStorage.getItem("magiccad.provider") || "anthropic";
+
+function applyProviderUI() {
+  const provider = el.providerSelect.value;
+  el.anthropicSettings.hidden = provider !== "anthropic";
+  el.openaiSettings.hidden = provider !== "openai";
+  const cfg = serverConfig?.[provider];
+  el.keyHint.textContent = cfg?.hasEnvKey
+    ? "已从环境变量读取 API Key，此处可留空"
+    : "Key 仅保存在本机浏览器中，并只发送给本地服务";
+}
+
+el.providerSelect.addEventListener("change", () => {
+  localStorage.setItem("magiccad.provider", el.providerSelect.value);
+  applyProviderUI();
 });
+applyProviderUI();
 
 fetch("/api/config")
   .then((r) => r.json())
   .then((cfg) => {
-    el.modelSelect.innerHTML = cfg.models
+    serverConfig = cfg;
+    el.modelSelect.innerHTML = cfg.anthropic.models
       .map((m) => `<option value="${m.id}">${m.label}</option>`)
       .join("");
     el.modelSelect.value =
-      localStorage.getItem("magiccad.model") || cfg.defaultModel;
-    if (cfg.hasEnvKey) {
-      el.keyHint.textContent = "已从环境变量读取 API Key，此处可留空";
-    }
+      localStorage.getItem("magiccad.model") || cfg.anthropic.defaultModel;
+    if (!el.openaiBaseUrl.value) el.openaiBaseUrl.placeholder = cfg.openai.defaultBaseUrl;
+    if (!el.openaiModel.value) el.openaiModel.placeholder = cfg.openai.defaultModel;
+    applyProviderUI();
   })
   .catch(() => setStatus("无法连接本地服务", "error"));
 
 el.modelSelect.addEventListener("change", () => {
   localStorage.setItem("magiccad.model", el.modelSelect.value);
 });
+
+function requestPayload() {
+  const provider = el.providerSelect.value;
+  if (provider === "openai") {
+    return {
+      provider,
+      apiKey: el.openaiKey.value.trim() || undefined,
+      model: el.openaiModel.value.trim() || undefined,
+      baseUrl: el.openaiBaseUrl.value.trim() || undefined,
+    };
+  }
+  return {
+    provider,
+    apiKey: el.apiKey.value.trim() || undefined,
+    model: el.modelSelect.value,
+  };
+}
 
 // ---------- 聊天 ----------
 
@@ -121,8 +172,7 @@ async function sendMessage(text) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: state.history,
-        apiKey: el.apiKey.value.trim() || undefined,
-        model: el.modelSelect.value,
+        ...requestPayload(),
       }),
     });
 

@@ -181,7 +181,7 @@ body {
   padding: 7px 9px;
 }
 
-#key-hint { color: var(--text-dim); font-size: 12px; margin: 8px 0 0; }
+#key-hint, .setting-note { color: var(--text-dim); font-size: 12px; margin: 8px 0 0; }
 
 /* ---------- 主区域 ---------- */
 

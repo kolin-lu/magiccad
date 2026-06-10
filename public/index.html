@@ -29,13 +29,36 @@
     </div>
 
     <details id="settings">
-      <summary>⚙ 设置（模型 / API Key）</summary>
-      <label>AI 模型
-        <select id="model-select"></select>
+      <summary>⚙ 设置（服务商 / 模型 / API Key）</summary>
+      <label>AI 服务商
+        <select id="provider-select">
+          <option value="anthropic">Anthropic Claude</option>
+          <option value="openai">OpenAI 协议（兼容接口）</option>
+        </select>
       </label>
-      <label>Anthropic API Key
-        <input id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
-      </label>
+
+      <div id="anthropic-settings">
+        <label>AI 模型
+          <select id="model-select"></select>
+        </label>
+        <label>Anthropic API Key
+          <input id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+        </label>
+      </div>
+
+      <div id="openai-settings" hidden>
+        <label>Base URL
+          <input id="openai-base-url" type="text" placeholder="https://api.openai.com/v1" autocomplete="off" />
+        </label>
+        <label>模型名称
+          <input id="openai-model" type="text" placeholder="gpt-4o / deepseek-chat / qwen-max …" autocomplete="off" />
+        </label>
+        <label>API Key
+          <input id="openai-key" type="password" placeholder="sk-..." autocomplete="off" />
+        </label>
+        <p class="setting-note">兼容 OpenAI / DeepSeek / 通义千问 / Moonshot / 本地 Ollama、vLLM 等任何 OpenAI 协议服务，Base URL 一般以 /v1 结尾</p>
+      </div>
+
       <p id="key-hint">Key 仅保存在本机浏览器中，并只发送给本地服务</p>
     </details>
   </aside>
