@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import jscad from "@jscad/modeling";
 import { isGeom3, isGeom2, isPath2 } from "./jscad-runner.js";
 
@@ -68,6 +69,25 @@ export class Viewer {
       else if (isGeom2(g)) this.modelGroup.add(buildShape2D(g));
       else if (isPath2(g)) this.modelGroup.add(buildPath(g));
     }
+    this.fitView();
+  }
+
+  /** 打开外部 STL 文件（二进制或 ASCII），仅查看 */
+  showSTL(arrayBuffer) {
+    const geo = new STLLoader().parse(arrayBuffer);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: 0x8fb87a,
+        metalness: 0.1,
+        roughness: 0.6,
+        flatShading: true,
+        side: THREE.DoubleSide,
+      })
+    );
+    this.modelGroup.clear();
+    this.modelGroup.add(mesh);
     this.fitView();
   }
 

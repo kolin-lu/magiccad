@@ -28,6 +28,12 @@ const el = {
   exportDxf: $("#export-dxf"),
   status: $("#status"),
   clearChat: $("#clear-chat"),
+  historyBtn: $("#history-btn"),
+  historyModal: $("#history-modal"),
+  historyList: $("#history-list"),
+  historyClose: $("#history-close"),
+  openFile: $("#open-file"),
+  fileInput: $("#file-input"),
 };
 
 const viewer = new Viewer(el.viewport);
@@ -36,6 +42,7 @@ const state = {
   history: [], // [{role:'user'|'assistant', content}]
   geometries: [],
   busy: false,
+  sessionId: null, // 当前会话 ID（首次生成成功后分配并持续保存）
 };
 
 // ---------- 设置（localStorage 持久化） ----------
@@ -215,11 +222,12 @@ async function sendMessage(text) {
     assistantBubble.textContent = stripCodeForDisplay(fullText);
 
     const code = extractCode(fullText);
+    if (code) el.codeArea.value = code.trim();
+    saveSession();
     if (!code) {
       setStatus("回复中没有建模代码", "warn");
       return;
     }
-    el.codeArea.value = code.trim();
     buildFromCode(code, { fromAI: true });
   } catch (err) {
     assistantBubble.remove();
@@ -271,7 +279,157 @@ function buildFromCode(code, { fromAI = false } = {}) {
   }
 }
 
+// ---------- 历史记录 ----------
+
+function deriveTitle() {
+  const first = state.history.find((m) => m.role === "user");
+  return first ? first.content.slice(0, 40) : "未命名会话";
+}
+
+async function saveSession() {
+  if (state.history.length === 0) return;
+  if (!state.sessionId) state.sessionId = crypto.randomUUID();
+  try {
+    await fetch(`/api/sessions/${state.sessionId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: deriveTitle(),
+        messages: state.history,
+        code: el.codeArea.value,
+      }),
+    });
+  } catch {
+    // 保存失败不打断使用
+  }
+}
+
+async function openHistoryModal() {
+  el.historyModal.hidden = false;
+  el.historyList.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    const sessions = await (await fetch("/api/sessions")).json();
+    if (sessions.length === 0) {
+      el.historyList.innerHTML = '<div class="empty">还没有历史会话</div>';
+      return;
+    }
+    el.historyList.innerHTML = "";
+    for (const s of sessions) {
+      el.historyList.appendChild(renderHistoryItem(s));
+    }
+  } catch {
+    el.historyList.innerHTML = '<div class="empty">加载失败</div>';
+  }
+}
+
+function renderHistoryItem(s) {
+  const item = document.createElement("div");
+  item.className = "history-item";
+
+  const info = document.createElement("div");
+  info.className = "info";
+  const title = document.createElement("div");
+  title.className = "title";
+  title.textContent = s.title;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `${formatTime(s.updatedAt)} · ${s.messageCount} 条消息${s.hasCode ? " · 含模型代码" : ""}`;
+  info.append(title, meta);
+  info.addEventListener("click", () => loadSession(s.id));
+
+  const loadBtn = document.createElement("button");
+  loadBtn.className = "load-btn";
+  loadBtn.textContent = "载入";
+  loadBtn.addEventListener("click", () => loadSession(s.id));
+
+  const delBtn = document.createElement("button");
+  delBtn.className = "del-btn";
+  delBtn.textContent = "删除";
+  delBtn.addEventListener("click", async () => {
+    if (!confirm(`删除会话「${s.title}」？`)) return;
+    await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
+    if (state.sessionId === s.id) state.sessionId = null;
+    item.remove();
+    if (!el.historyList.children.length) {
+      el.historyList.innerHTML = '<div class="empty">还没有历史会话</div>';
+    }
+  });
+
+  item.append(info, loadBtn, delBtn);
+  return item;
+}
+
+function formatTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+async function loadSession(id) {
+  try {
+    const resp = await fetch(`/api/sessions/${id}`);
+    if (!resp.ok) throw new Error("会话不存在");
+    const session = await resp.json();
+
+    state.sessionId = session.id;
+    state.history = session.messages || [];
+    el.chat.innerHTML = "";
+    for (const m of state.history) {
+      addBubble(m.role, m.role === "assistant" ? stripCodeForDisplay(m.content) : m.content);
+    }
+
+    el.historyModal.hidden = true;
+    if (session.code) {
+      el.codeArea.value = session.code;
+      buildFromCode(session.code);
+    } else {
+      setStatus("已载入会话", "ok");
+    }
+  } catch (err) {
+    setStatus(`载入失败：${err.message}`, "error");
+  }
+}
+
+// ---------- 打开文件 ----------
+
+async function openLocalFile(file) {
+  const name = file.name.toLowerCase();
+  try {
+    if (name.endsWith(".stl")) {
+      viewer.showSTL(await file.arrayBuffer());
+      state.geometries = [];
+      el.exportStl.disabled = true;
+      el.exportSvg.disabled = true;
+      el.exportDxf.disabled = true;
+      setStatus(`已打开 ${file.name}（查看模式，导出不可用）`, "ok");
+    } else if (name.endsWith(".js")) {
+      const code = await file.text();
+      el.codeArea.value = code;
+      el.codePanel.classList.remove("collapsed");
+      el.codeToggle.textContent = "代码 ▾";
+      buildFromCode(code);
+    } else {
+      setStatus("不支持的文件类型，请选择 .stl 或 .js 文件", "warn");
+    }
+  } catch (err) {
+    setStatus(`打开文件失败：${err.message}`, "error");
+  }
+}
+
 // ---------- 事件绑定 ----------
+
+el.historyBtn.addEventListener("click", openHistoryModal);
+el.historyClose.addEventListener("click", () => (el.historyModal.hidden = true));
+el.historyModal.addEventListener("click", (e) => {
+  if (e.target === el.historyModal) el.historyModal.hidden = true;
+});
+
+el.openFile.addEventListener("click", () => el.fileInput.click());
+el.fileInput.addEventListener("change", () => {
+  const file = el.fileInput.files[0];
+  el.fileInput.value = "";
+  if (file) openLocalFile(file);
+});
 
 el.send.addEventListener("click", () => {
   const text = el.input.value;
@@ -295,6 +453,7 @@ el.examples.addEventListener("click", (e) => {
 
 el.clearChat.addEventListener("click", () => {
   state.history = [];
+  state.sessionId = null;
   el.chat.innerHTML = "";
   addBubble("assistant", "已开启新会话。描述你想要的模型吧！");
 });
@@ -308,6 +467,7 @@ el.codeToggle.addEventListener("click", () => {
 
 el.runCode.addEventListener("click", () => {
   buildFromCode(el.codeArea.value);
+  if (state.sessionId) saveSession();
 });
 
 el.exportStl.addEventListener("click", () => safeExport(() => exportSTL(state.geometries)));

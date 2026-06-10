@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { generate, AVAILABLE_MODELS, DEFAULT_MODEL } from "./llm.js";
+import { createHistoryStore } from "./history.js";
 import {
   generateOpenAI,
   DEFAULT_OPENAI_BASE_URL,
@@ -16,6 +17,33 @@ const PORT = process.env.PORT || 5173;
 const app = express();
 app.use(express.json({ limit: "4mb" }));
 app.use(express.static(path.join(__dirname, "..", "public")));
+
+const history = createHistoryStore(path.join(__dirname, "..", "data"));
+
+// ---------- 会话历史 ----------
+
+app.get("/api/sessions", async (_req, res) => {
+  res.json(await history.list());
+});
+
+app.get("/api/sessions/:id", async (req, res) => {
+  const session = await history.get(req.params.id);
+  if (!session) return res.status(404).json({ error: "会话不存在" });
+  res.json(session);
+});
+
+app.put("/api/sessions/:id", async (req, res) => {
+  try {
+    const record = await history.save(req.params.id, req.body || {});
+    res.json({ id: record.id, updatedAt: record.updatedAt });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete("/api/sessions/:id", async (req, res) => {
+  res.json({ ok: await history.remove(req.params.id) });
+});
 
 app.get("/api/config", (_req, res) => {
   res.json({

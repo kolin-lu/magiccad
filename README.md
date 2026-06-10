@@ -62,6 +62,8 @@ npm start
 ## 功能
 
 - 💬 **多轮对话建模**：在已有模型上继续修改（"把圆角加大"、"再挖四个孔"）
+- 🕘 **历史记录**：会话自动保存到本地 `data/sessions/`，随时打开「历史」载入继续编辑或删除
+- 📂 **打开文件**：打开 `.stl` 模型直接预览（查看模式），打开 `.js` 建模代码载入并运行
 - 🔧 **代码可见可改**：底部代码面板展示 AI 生成的 JSCAD 代码，改完点「运行」即时生效
 - 🩹 **错误自修复**：代码执行报错时，一键把错误信息发回给 AI 修复
 - 📦 **2D/3D 自动识别**：根据几何体类型自动启用对应的导出按钮
@@ -74,6 +76,7 @@ server/
   index.js        Express 本地服务器（静态资源 + /api/generate 流式接口）
   llm.js          Anthropic SDK 调用 + 建模系统提示词
   llm-openai.js   OpenAI 协议适配（兼容 DeepSeek/通义/Ollama 等）
+  history.js      会话历史存储（data/sessions/ 下的 JSON 文件）
 src/client/
   main.js         界面逻辑（聊天、流式解析、导出）
   jscad-runner.js 执行 AI 生成的建模代码
