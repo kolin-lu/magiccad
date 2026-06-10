@@ -80,6 +80,9 @@ body {
   z-index: 100;
 }
 
+/* display:flex 会覆盖 hidden 属性的默认 display:none，必须显式补回 */
+#history-modal[hidden] { display: none; }
+
 #history-card {
   width: 520px;
   max-width: 92vw;
