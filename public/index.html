@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MagicCAD — 自然语言生成 2D/3D 模型</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <header id="brand">
+      <h1>Magic<span>CAD</span></h1>
+      <button id="clear-chat" title="新会话">新会话</button>
+    </header>
+
+    <div id="chat"></div>
+
+    <div id="examples">
+      <button data-prompt="一个法兰盘：外径 80mm，厚 10mm，中心孔直径 30mm，周围均布 6 个直径 8mm 的安装孔">法兰盘</button>
+      <button data-prompt="一个 20 齿的直齿轮，模数 2，厚度 8mm，中心带 10mm 的轴孔和键槽">齿轮</button>
+      <button data-prompt="M10 六角螺母，按标准尺寸建模">六角螺母</button>
+      <button data-prompt="2D 图形：一个五角星 logo，外接圆直径 60mm，中间镂空一个圆">2D 五角星</button>
+      <button data-prompt="一个带提手的小收纳盒，100×60×40mm，壁厚 2.5mm，圆角">收纳盒</button>
+    </div>
+
+    <div id="composer">
+      <textarea id="input" rows="3" placeholder="描述你想要的模型，例如：一个直径 50mm 的圆形杯垫，刻上波浪纹…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="send">发送</button>
+    </div>
+
+    <details id="settings">
+      <summary>⚙ 设置（模型 / API Key）</summary>
+      <label>AI 模型
+        <select id="model-select"></select>
+      </label>
+      <label>Anthropic API Key
+        <input id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+      </label>
+      <p id="key-hint">Key 仅保存在本机浏览器中，并只发送给本地服务</p>
+    </details>
+  </aside>
+
+  <main id="main">
+    <div id="toolbar">
+      <span id="status">就绪</span>
+      <div class="spacer"></div>
+      <button id="export-stl" disabled>导出 STL（3D 打印）</button>
+      <button id="export-svg" disabled>导出 SVG</button>
+      <button id="export-dxf" disabled>导出 DXF</button>
+    </div>
+
+    <div id="viewport"></div>
+
+    <div id="code-panel" class="collapsed">
+      <div id="code-header">
+        <button id="code-toggle">代码 ▴</button>
+        <span class="hint">可手动修改参数后重新运行</span>
+        <div class="spacer"></div>
+        <button id="run-code">▶ 运行</button>
+      </div>
+      <textarea id="code-area" spellcheck="false" placeholder="AI 生成的 JSCAD 建模代码会显示在这里"></textarea>
+    </div>
+  </main>
+
+  <script type="module" src="bundle.js"></script>
+</body>
+</html>

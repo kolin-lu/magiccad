@@ -1,0 +1,25 @@
+{
+  "name": "magiccad",
+  "version": "0.1.0",
+  "description": "通过自然语言 + AI 大模型生成 2D/3D 模型的本地应用",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "build": "esbuild src/client/main.js --bundle --format=esm --outfile=public/bundle.js --minify",
+    "dev": "npm run build && node server/index.js",
+    "start": "npm run build && node server/index.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.74.0",
+    "@jscad/dxf-serializer": "^2.1.21",
+    "@jscad/modeling": "^2.12.5",
+    "@jscad/stl-serializer": "^2.1.20",
+    "@jscad/svg-serializer": "^2.3.17",
+    "express": "^4.21.2",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
