@@ -18,6 +18,44 @@
 /* hidden 属性必须始终生效，防止被任何 display 规则覆盖（如 label 的 display:block） */
 [hidden] { display: none !important; }
 
+/* ---------- 滚动条：默认隐形，滚动中或悬停滑块时显示 ----------
+   Chromium/Safari 用 ::-webkit-scrollbar；.scrolling 类由 scrollbar.js 在滚动期间添加 */
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent; /* 留出内边距，显形时是悬浮的细胶囊 */
+  background-clip: padding-box;
+  transition: background-color 0.25s;
+}
+
+.scrolling::-webkit-scrollbar-thumb {
+  background-color: rgba(139, 147, 165, 0.35);
+}
+
+/* 滑块虽然透明但仍可命中，鼠标移到滚动条区域即显示 */
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(139, 147, 165, 0.55);
+}
+
+/* Firefox 不支持 ::-webkit-scrollbar，退化为常驻的细半透明滚动条 */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 147, 165, 0.35) transparent;
+  }
+}
+
 body {
   margin: 0;
   height: 100vh;
