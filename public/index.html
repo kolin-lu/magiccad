@@ -134,7 +134,12 @@
       <div id="code-header">
         <button id="code-toggle">代码 ▴</button>
         <span class="hint">可手动修改参数后重新运行</span>
-        <select id="version-select" title="版本快照，选择可回退" hidden></select>
+        <select id="version-select" title="版本快照（AI 生成 / 手动修改），选择可回退" hidden></select>
+        <span id="code-save-hint" hidden>
+          代码已手动修改
+          <button id="save-version">保存版本</button>
+          <button id="dismiss-save">忽略</button>
+        </span>
         <div class="spacer"></div>
         <button id="run-code" title="运行（Ctrl+Enter）">▶ 运行</button>
       </div>

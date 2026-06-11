@@ -1,6 +1,7 @@
 import { Viewer } from "./viewer.js";
 import { runModelCode } from "./jscad-runner.js";
 import { exportSTL, exportSVG, exportDXF } from "./export.js";
+import { marked } from "marked";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -42,6 +43,9 @@ const el = {
   codeToggle: $("#code-toggle"),
   runCode: $("#run-code"),
   versionSelect: $("#version-select"),
+  codeSaveHint: $("#code-save-hint"),
+  saveVersion: $("#save-version"),
+  dismissSave: $("#dismiss-save"),
   screenshot: $("#screenshot"),
   shareWork: $("#share-work"),
   shareModal: $("#share-modal"),
@@ -413,7 +417,8 @@ async function consumeJobStream(jobId, assistantBubble) {
         assistantBubble.appendChild(entry.root);
       }
       if (seg.type === "text") {
-        entry.root.textContent = stripCodeForDisplay(seg.text);
+        entry.root.className = "md";
+        entry.root.innerHTML = renderMarkdown(stripCodeForDisplay(seg.text));
       } else {
         entry.body.textContent = seg.text.trim();
         entry.summary.textContent = seg.closed ? "💭 思考过程" : "💭 思考中…";
@@ -533,6 +538,22 @@ function stripCodeForDisplay(text) {
   return text.replace(/```(?:javascript|js)?\s*\n[\s\S]*?(```|$)/g, "〔已生成建模代码 →〕").trim();
 }
 
+/**
+ * Markdown 渲染（用于助手回复气泡）。
+ * 先把输入中的 HTML 转义再交给 marked，模型输出的任何标签都只会按文本显示；
+ * 渲染后再过滤非 http(s) 链接并强制新窗口打开。
+ */
+function renderMarkdown(text) {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  let html = marked.parse(escaped, { breaks: true, async: false });
+  html = html.replace(/<a\s+href="(?!https?:\/\/)[^"]*"/gi, '<a href="#"');
+  html = html.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ');
+  return html;
+}
+
 /** 把正文按 <think>...</think> 切分为交替的 text / think 分段（末段允许未闭合） */
 function splitThinkSegments(raw) {
   const segments = [];
@@ -577,7 +598,7 @@ function createAssistantSegment(type) {
 
 // ---------- 构建与渲染 ----------
 
-function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false } = {}) {
+function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false, source = "manual" } = {}) {
   try {
     const { geometries, kinds } = runModelCode(code);
     state.geometries = geometries;
@@ -591,7 +612,7 @@ function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false } 
     applyAutoView(kinds);
     updateGridInfo(info.gridSpacing);
     highlightErrorLine(null);
-    if (snapshot) pushVersion(code);
+    if (snapshot) pushVersion(code, fromAI ? "ai" : source);
     if (!quiet) renderParamPanel(code);
 
     setStatus(
@@ -786,13 +807,17 @@ el.paramCollapse.addEventListener("click", () => {
 // ---------- 版本快照 ----------
 
 const MAX_VERSIONS = 20;
+const VERSION_SOURCE_LABELS = { ai: "AI", manual: "手动", load: "载入" };
 
-function pushVersion(code) {
+function pushVersion(code, source = "manual") {
   const last = state.versions[state.versions.length - 1];
   if (last && last.code === code) return;
-  state.versions.push({ code, time: new Date() });
+  state.versions.push({ code, time: new Date(), source });
   if (state.versions.length > MAX_VERSIONS) state.versions.shift();
   renderVersionSelect(state.versions.length - 1);
+  // 新快照覆盖了未保存的手动修改提示
+  codeDirty = false;
+  el.codeSaveHint.hidden = true;
 }
 
 function renderVersionSelect(selected) {
@@ -800,17 +825,48 @@ function renderVersionSelect(selected) {
   el.versionSelect.innerHTML = state.versions
     .map((v, i) => {
       const t = `${String(v.time.getHours()).padStart(2, "0")}:${String(v.time.getMinutes()).padStart(2, "0")}`;
-      return `<option value="${i}">V${i + 1} · ${t}</option>`;
+      const label = VERSION_SOURCE_LABELS[v.source] || "手动";
+      return `<option value="${i}">V${i + 1} · ${label} · ${t}</option>`;
     })
     .join("");
   el.versionSelect.value = String(selected);
 }
+
+// ---------- 手动修改的保存提示 ----------
+
+let codeDirty = false; // 仅用户在代码区敲键盘时置位（程序写入不会触发 input 事件）
+
+el.codeArea.addEventListener("input", () => {
+  codeDirty = true;
+});
+
+// 光标离开代码区且有未保存的手动修改时，提示是否保存为版本
+el.codeArea.addEventListener("blur", () => {
+  const code = el.codeArea.value;
+  const last = state.versions[state.versions.length - 1];
+  if (codeDirty && code.trim() && code !== last?.code) {
+    el.codeSaveHint.hidden = false;
+  }
+});
+
+el.saveVersion.addEventListener("click", () => {
+  pushVersion(el.codeArea.value, "manual");
+  saveSession();
+  setStatus("已保存手动修改为版本快照", "ok");
+});
+
+el.dismissSave.addEventListener("click", () => {
+  codeDirty = false;
+  el.codeSaveHint.hidden = true;
+});
 
 el.versionSelect.addEventListener("change", () => {
   const v = state.versions[Number(el.versionSelect.value)];
   if (!v) return;
   el.codeArea.value = v.code;
   updateGutter();
+  codeDirty = false;
+  el.codeSaveHint.hidden = true;
   buildFromCode(v.code, { snapshot: false });
   setStatus(`已回退到 V${Number(el.versionSelect.value) + 1}`, "ok");
 });
@@ -945,7 +1001,7 @@ function loadPendingWork() {
     updateGutter();
     el.codePanel.classList.remove("collapsed");
     el.codeToggle.textContent = "代码 ▾";
-    buildFromCode(code);
+    buildFromCode(code, { source: "load" });
     addBubble("assistant", `已载入市场作品「${title}」，可以直接修改代码，或继续用对话改进它。`);
   } catch {
     // 忽略损坏数据
@@ -1050,8 +1106,15 @@ async function loadSession(id) {
     el.chat.innerHTML = "";
     for (const m of state.history) {
       // stripThink 兼容旧版本保存的会话（当时思考标签未剥离就入库）
-      if (m.role === "assistant") addBubble("assistant", stripCodeForDisplay(stripThink(m.content)));
-      else addUserBubble(m.content);
+      if (m.role === "assistant") {
+        const bubble = addBubble("assistant", "");
+        const div = document.createElement("div");
+        div.className = "md";
+        div.innerHTML = renderMarkdown(stripCodeForDisplay(stripThink(m.content)));
+        bubble.appendChild(div);
+      } else {
+        addUserBubble(m.content);
+      }
     }
 
     el.historyModal.hidden = true;
@@ -1059,7 +1122,7 @@ async function loadSession(id) {
     if (session.code) {
       el.codeArea.value = session.code;
       updateGutter();
-      buildFromCode(session.code);
+      buildFromCode(session.code, { source: "load" });
     } else {
       el.versionSelect.hidden = true;
       setStatus("已载入会话", "ok");
@@ -1093,7 +1156,7 @@ async function openLocalFile(file) {
       updateGutter();
       el.codePanel.classList.remove("collapsed");
       el.codeToggle.textContent = "代码 ▾";
-      buildFromCode(code);
+      buildFromCode(code, { source: "load" });
     } else if (/\.(png|jpe?g|webp)$/.test(name)) {
       openCropModal(file);
     } else {

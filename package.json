@@ -17,6 +17,7 @@
     "@jscad/stl-serializer": "^2.1.20",
     "@jscad/svg-serializer": "^2.3.17",
     "express": "^4.21.2",
+    "marked": "^18.0.5",
     "openai": "^6.42.0",
     "three": "^0.170.0"
   },
