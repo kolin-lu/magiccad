@@ -1,6 +1,6 @@
 {
   "name": "magiccad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "通过自然语言 + AI 大模型生成 2D/3D 模型的本地应用",
   "type": "module",
   "main": "server/index.js",

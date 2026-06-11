@@ -331,15 +331,38 @@ async function sendTurn(content) {
   state.history.push({ role: "user", content });
   addUserBubble(content);
   const assistantBubble = addBubble("assistant", "");
-  const answerDiv = document.createElement("div");
-  answerDiv.textContent = "…";
-  assistantBubble.appendChild(answerDiv);
-  // 思考过程（管理员开启时由服务端推送）展示为回答上方的折叠块，不进入对话历史
-  let thinkingBox = null;
-  let thinkingBody = null;
-  let thinkingText = "";
+  const placeholderDiv = document.createElement("div");
+  placeholderDiv.textContent = "…";
+  assistantBubble.appendChild(placeholderDiv);
 
-  let fullText = "";
+  // 思考过程展示（默认收起，不进入对话历史）：
+  // 1) 标准思考事件（Claude thinking / reasoning_content）→ 单个折叠块
+  // 2) 模型在正文里输出的 <think>...</think> → 每对标签一个独立折叠块
+  let eventThinking = null;
+  const segEls = []; // <think> 分段对应的 DOM（分段只增不减，末段内容会持续更新）
+
+  let rawText = "";
+
+  const renderAssistant = () => {
+    placeholderDiv.remove();
+    const segments = splitThinkSegments(rawText);
+    segments.forEach((seg, i) => {
+      let entry = segEls[i];
+      if (!entry || entry.type !== seg.type) {
+        if (entry) entry.root.remove();
+        entry = createAssistantSegment(seg.type);
+        segEls[i] = entry;
+        assistantBubble.appendChild(entry.root);
+      }
+      if (seg.type === "text") {
+        entry.root.textContent = stripCodeForDisplay(seg.text);
+      } else {
+        entry.body.textContent = seg.text.trim();
+        entry.summary.textContent = seg.closed ? "💭 思考过程" : "💭 思考中…";
+      }
+    });
+    el.chat.scrollTop = el.chat.scrollHeight;
+  };
   try {
     const resp = await fetch("/api/generate", {
       method: "POST",
@@ -372,26 +395,19 @@ async function sendTurn(content) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
         if (event.type === "thinking") {
-          if (!thinkingBox) {
-            thinkingBox = document.createElement("details");
-            thinkingBox.className = "bubble-thinking";
-            thinkingBox.open = true;
-            const summary = document.createElement("summary");
-            summary.textContent = "💭 思考过程";
-            thinkingBody = document.createElement("div");
-            thinkingBody.className = "thinking-body";
-            thinkingBox.append(summary, thinkingBody);
-            assistantBubble.insertBefore(thinkingBox, answerDiv);
+          if (!eventThinking) {
+            eventThinking = createAssistantSegment("think");
+            eventThinking.text = "";
+            assistantBubble.insertBefore(eventThinking.root, assistantBubble.firstChild);
           }
-          thinkingText += event.text;
-          thinkingBody.textContent = thinkingText;
+          eventThinking.text += event.text;
+          eventThinking.body.textContent = eventThinking.text;
           el.chat.scrollTop = el.chat.scrollHeight;
           setStatus("AI 正在思考…");
         } else if (event.type === "text") {
-          if (!fullText && thinkingBox) thinkingBox.open = false; // 开始回答时折叠思考
-          fullText += event.text;
-          answerDiv.textContent = stripCodeForDisplay(fullText);
-          el.chat.scrollTop = el.chat.scrollHeight;
+          rawText += event.text;
+          if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
+          renderAssistant();
           setStatus("AI 正在生成模型代码…");
         } else if (event.type === "error") {
           streamError = event.message;
@@ -401,12 +417,17 @@ async function sendTurn(content) {
       }
     }
     if (streamError) throw new Error(streamError);
-    if (!fullText.trim()) throw new Error("模型没有返回内容，请重试。");
+    // 思考内容（标签内或事件流）不写入历史、不回传模型
+    const visibleText = stripThink(rawText);
+    if (!visibleText.trim()) throw new Error("模型没有返回内容，请重试。");
 
-    state.history.push({ role: "assistant", content: fullText });
-    answerDiv.textContent = stripCodeForDisplay(fullText);
+    state.history.push({ role: "assistant", content: visibleText });
+    renderAssistant();
+    for (const entry of segEls) {
+      if (entry?.type === "think") entry.summary.textContent = "💭 思考过程";
+    }
 
-    const code = extractCode(fullText)?.trim();
+    const code = extractCode(visibleText)?.trim();
     if (code) {
       el.codeArea.value = code;
       updateGutter();
@@ -433,6 +454,48 @@ async function sendTurn(content) {
 /** 聊天气泡里隐藏大段代码，只显示说明文字 */
 function stripCodeForDisplay(text) {
   return text.replace(/```(?:javascript|js)?\s*\n[\s\S]*?(```|$)/g, "〔已生成建模代码 →〕").trim();
+}
+
+/** 把正文按 <think>...</think> 切分为交替的 text / think 分段（末段允许未闭合） */
+function splitThinkSegments(raw) {
+  const segments = [];
+  let rest = raw;
+  while (true) {
+    const open = rest.indexOf("<think>");
+    if (open === -1) {
+      segments.push({ type: "text", text: rest });
+      break;
+    }
+    if (open > 0) segments.push({ type: "text", text: rest.slice(0, open) });
+    const close = rest.indexOf("</think>", open);
+    if (close === -1) {
+      segments.push({ type: "think", text: rest.slice(open + 7), closed: false });
+      break;
+    }
+    segments.push({ type: "think", text: rest.slice(open + 7, close), closed: true });
+    rest = rest.slice(close + 8);
+  }
+  return segments;
+}
+
+/** 去掉 <think> 标签内容（含未闭合的），得到真正的回答正文 */
+function stripThink(text) {
+  return text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
+}
+
+/** 助手气泡分段元素：text 为普通 div，think 为默认收起的折叠块 */
+function createAssistantSegment(type) {
+  if (type === "text") {
+    return { type, root: document.createElement("div") };
+  }
+  const root = document.createElement("details");
+  root.className = "bubble-thinking";
+  const summary = document.createElement("summary");
+  summary.textContent = "💭 思考中…";
+  const body = document.createElement("div");
+  body.className = "thinking-body";
+  root.append(summary, body);
+  return { type, root, summary, body };
 }
 
 // ---------- 构建与渲染 ----------
@@ -1167,6 +1230,18 @@ el.clearChat.addEventListener("click", () => {
   state.versions = [];
   el.versionSelect.hidden = true;
   el.chat.innerHTML = "";
+  // 清空画布、代码与相关状态
+  state.geometries = [];
+  viewer.setGeometries([]);
+  el.codeArea.value = "";
+  highlightErrorLine(null);
+  renderParamPanel("");
+  el.exportStl.disabled = true;
+  el.exportSvg.disabled = true;
+  el.exportDxf.disabled = true;
+  el.shareWork.disabled = true;
+  el.screenshot.disabled = true;
+  setStatus("就绪");
   addBubble("assistant", "已开启新会话。描述你想要的模型吧！");
 });
 
