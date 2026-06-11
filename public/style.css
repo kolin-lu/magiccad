@@ -81,7 +81,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  /* 空间不足时按钮行作为整体换行，避免按钮内部文字竖排 */
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -90,21 +93,29 @@ body {
   font-size: 18px;
   letter-spacing: 0.5px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 #brand h1 span { color: var(--accent); }
 
-.brand-actions { display: flex; gap: 6px; }
+.brand-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: auto; /* 换行后整行靠右，与标题对齐美观 */
+}
 
 .brand-actions button,
 #clear-chat {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: 7px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .brand-actions button:hover { border-color: var(--accent); }
@@ -461,10 +472,12 @@ body {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: 7px;
-  font-size: 13px;
+  font-size: 12.5px;
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .brand-actions a.btn-like:hover { border-color: var(--accent); }
@@ -574,7 +587,8 @@ body.market-page {
 #market-topbar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
@@ -583,7 +597,9 @@ body.market-page {
   z-index: 10;
 }
 
-#market-topbar .auth-brand { font-size: 18px; }
+#market-topbar .auth-brand { font-size: 18px; white-space: nowrap; }
+
+#market-topbar .btn-link { white-space: nowrap; flex-shrink: 0; }
 
 .market-user { color: var(--text-dim); font-size: 13px; }
 
@@ -1288,4 +1304,19 @@ button.small { padding: 3px 10px; font-size: 12px; border-radius: 6px;
   align-items: center;
   gap: 5px;
   cursor: pointer;
+}
+
+/* ---------- 窄屏适配 ---------- */
+
+@media (max-width: 760px) {
+  /* 侧栏让出空间，标题缩小，保证按钮行尽量不换行 */
+  #sidebar { width: min(86vw, 340px); min-width: 0; }
+  #brand h1 { font-size: 16px; }
+  .brand-actions button,
+  .brand-actions a.btn-like { padding: 4px 8px; font-size: 12px; }
+}
+
+@media (max-width: 480px) {
+  /* 极窄屏隐藏版本标签，把空间留给功能按钮 */
+  #brand .ver-tag { display: none; }
 }

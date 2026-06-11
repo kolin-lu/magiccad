@@ -1045,7 +1045,8 @@ async function loadSession(id) {
     state.history = session.messages || [];
     el.chat.innerHTML = "";
     for (const m of state.history) {
-      if (m.role === "assistant") addBubble("assistant", stripCodeForDisplay(m.content));
+      // stripThink 兼容旧版本保存的会话（当时思考标签未剥离就入库）
+      if (m.role === "assistant") addBubble("assistant", stripCodeForDisplay(stripThink(m.content)));
       else addUserBubble(m.content);
     }
 
