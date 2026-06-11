@@ -94,10 +94,14 @@ function main(params) {
 4. 只重建主体结构与显著特征（孔、槽、凸台、圆角），忽略纹理、阴影、背景和无关物体。
 5. 关键尺寸照旧写成 main 开头的 const 常量，方便用户用参数面板校正比例。`;
 
-function buildClient(apiKey) {
-  // 优先使用请求里用户在界面配置的 Key，否则回落到环境变量 ANTHROPIC_API_KEY
-  if (apiKey) return new Anthropic({ apiKey });
-  return new Anthropic();
+function buildClient(apiKey, baseUrl) {
+  // Key/Base URL 优先使用账户或共享配置，否则回落到环境变量
+  // （ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL，SDK 自动读取）；
+  // 自定义 Base URL 可接入任何兼容 Anthropic 协议的代理或中转服务
+  const options = {};
+  if (apiKey) options.apiKey = apiKey;
+  if (baseUrl) options.baseURL = baseUrl;
+  return new Anthropic(options);
 }
 
 /** 中立内容块（{type:'image',mediaType,data} / {type:'text',text}）→ Anthropic 消息格式 */
@@ -122,10 +126,10 @@ function toAnthropicMessages(messages) {
  * 流式生成建模代码。onEvent 收到 {type:'text',text} / {type:'done',...} / {type:'error',message}
  */
 export async function generate(
-  { messages, apiKey, model, showThinking = false, effort = "balanced", signal },
+  { messages, apiKey, model, baseUrl, showThinking = false, effort = "balanced", signal },
   onEvent
 ) {
-  const client = buildClient(apiKey);
+  const client = buildClient(apiKey, baseUrl);
   const finalModel = model || DEFAULT_MODEL;
   // Haiku 不支持 output_config.effort 参数，只能用提示词控制
   const isHaiku = finalModel.includes("haiku");

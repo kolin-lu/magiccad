@@ -15,6 +15,7 @@ const el = {
   anthropicSettings: $("#anthropic-settings"),
   openaiSettings: $("#openai-settings"),
   modelSelect: $("#model-select"),
+  anthropicBaseUrl: $("#anthropic-base-url"),
   apiKey: $("#api-key"),
   openaiBaseUrl: $("#openai-base-url"),
   openaiModel: $("#openai-model"),
@@ -173,6 +174,7 @@ async function loadLlmConfig() {
     .map((m) => `<option value="${m.id}">${m.label}</option>`)
     .join("");
   el.modelSelect.value = llmConfig.anthropic.model || llmConfig.anthropic.defaultModel;
+  el.anthropicBaseUrl.value = llmConfig.anthropic.baseUrl;
   el.openaiBaseUrl.value = llmConfig.openai.baseUrl;
   el.openaiBaseUrl.placeholder = llmConfig.openai.defaultBaseUrl;
   el.openaiModel.value = llmConfig.openai.model;
@@ -183,7 +185,7 @@ async function loadLlmConfig() {
 async function saveProviderConfig(provider, extra = {}) {
   const base =
     provider === "anthropic"
-      ? { model: el.modelSelect.value }
+      ? { model: el.modelSelect.value, baseUrl: el.anthropicBaseUrl.value.trim() }
       : { model: el.openaiModel.value.trim(), baseUrl: el.openaiBaseUrl.value.trim() };
   try {
     await fetch("/api/llm/config", {
@@ -213,6 +215,7 @@ bindKeyInput(el.apiKey, "anthropic");
 bindKeyInput(el.openaiKey, "openai");
 
 el.modelSelect.addEventListener("change", () => saveProviderConfig("anthropic"));
+el.anthropicBaseUrl.addEventListener("change", () => saveProviderConfig("anthropic"));
 el.openaiModel.addEventListener("change", () => saveProviderConfig("openai"));
 el.openaiBaseUrl.addEventListener("change", () => saveProviderConfig("openai"));
 
@@ -234,6 +237,7 @@ function requestPayload() {
     payload.baseUrl = el.openaiBaseUrl.value.trim() || undefined;
   } else {
     payload.model = el.modelSelect.value;
+    payload.baseUrl = el.anthropicBaseUrl.value.trim() || undefined;
   }
   return payload;
 }

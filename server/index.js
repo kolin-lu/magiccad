@@ -116,6 +116,7 @@ app.get("/api/llm/config", auth.requireAuth, (req, res) => {
       models: AVAILABLE_MODELS,
       defaultModel: DEFAULT_MODEL,
       model: a?.model || "",
+      baseUrl: a?.base_url || "",
       hasKey: Boolean(a?.api_key) || Boolean(process.env.ANTHROPIC_API_KEY),
     },
     openai: {
@@ -311,6 +312,7 @@ app.post("/api/generate", auth.requireAuth, (req, res) => {
             messages: llmMessages,
             apiKey,
             model: finalModel || undefined,
+            baseUrl: finalBaseUrl || undefined,
             showThinking,
             effort,
             signal: job.controller.signal,

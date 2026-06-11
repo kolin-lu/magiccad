@@ -25,12 +25,16 @@
         <form class="shared-form" data-provider="anthropic">
           <h3>Anthropic Claude</h3>
           <label class="check-row"><input type="checkbox" name="enabled" /> 启用</label>
+          <label>Base URL（可选）
+            <input type="text" name="baseUrl" placeholder="默认官方 https://api.anthropic.com" autocomplete="off" />
+          </label>
           <label>API Key
             <input type="password" name="apiKey" placeholder="sk-ant-..." autocomplete="off" />
           </label>
           <label>模型
             <input type="text" name="model" placeholder="claude-opus-4-8" autocomplete="off" />
           </label>
+          <p class="setting-note">Base URL 留空走官方接口；可填任何兼容 Anthropic 协议的代理/中转地址</p>
           <button type="submit">保存</button>
           <span class="save-state"></span>
         </form>

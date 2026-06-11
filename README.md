@@ -59,7 +59,8 @@ npm start
 
 - 在 [Anthropic Console](https://platform.claude.com/) 获取 API Key
 - 默认 `claude-opus-4-8`，可切换为 Sonnet（更便宜）或 Haiku（更快）
-- 环境变量方式：`export ANTHROPIC_API_KEY=sk-ant-...`（作为所有用户的回落 Key）
+- 支持自定义 Base URL：留空走官方接口，可填任何兼容 Anthropic 协议的代理/中转地址（用户设置与管理后台共享配置均支持）
+- 环境变量方式：`ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`（作为所有用户的回落配置）
 
 **② OpenAI 协议（兼容接口）**
 
