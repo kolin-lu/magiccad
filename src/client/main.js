@@ -9,6 +9,8 @@ const el = {
   input: $("#input"),
   send: $("#send"),
   examples: $("#examples"),
+  keySource: $("#key-source"),
+  sharedHint: $("#shared-hint"),
   providerSelect: $("#provider-select"),
   anthropicSettings: $("#anthropic-settings"),
   openaiSettings: $("#openai-settings"),
@@ -18,11 +20,23 @@ const el = {
   openaiModel: $("#openai-model"),
   openaiKey: $("#openai-key"),
   keyHint: $("#key-hint"),
+  userName: $("#user-name"),
+  adminLink: $("#admin-link"),
+  changePassword: $("#change-password"),
+  logout: $("#logout"),
   viewport: $("#viewport"),
   codePanel: $("#code-panel"),
   codeArea: $("#code-area"),
   codeToggle: $("#code-toggle"),
   runCode: $("#run-code"),
+  shareWork: $("#share-work"),
+  shareModal: $("#share-modal"),
+  shareClose: $("#share-close"),
+  shareForm: $("#share-form"),
+  shareTitle: $("#share-title"),
+  shareDesc: $("#share-desc"),
+  shareError: $("#share-error"),
+  shareSubmit: $("#share-submit"),
   exportStl: $("#export-stl"),
   exportSvg: $("#export-svg"),
   exportDxf: $("#export-dxf"),
@@ -39,80 +53,158 @@ const el = {
 const viewer = new Viewer(el.viewport);
 
 const state = {
+  me: null,
   history: [], // [{role:'user'|'assistant', content}]
   geometries: [],
   busy: false,
   sessionId: null, // 当前会话 ID（首次生成成功后分配并持续保存）
 };
 
-// ---------- 设置（localStorage 持久化） ----------
+// ---------- 登录态 ----------
 
-let serverConfig = null;
+function gotoLogin() {
+  location.href = "/login.html";
+}
 
-function bindSetting(input, key) {
-  input.value = localStorage.getItem(key) || "";
-  input.addEventListener("change", () => {
-    localStorage.setItem(key, input.value.trim());
+async function initAuth() {
+  const resp = await fetch("/api/me");
+  if (!resp.ok) {
+    gotoLogin();
+    return false;
+  }
+  state.me = (await resp.json()).user;
+  el.userName.textContent = `👤 ${state.me.username}`;
+  el.adminLink.hidden = state.me.role !== "admin";
+  return true;
+}
+
+el.logout.addEventListener("click", async () => {
+  await fetch("/api/auth/logout", { method: "POST" });
+  gotoLogin();
+});
+
+el.changePassword.addEventListener("click", async () => {
+  const oldPassword = prompt("请输入当前密码：");
+  if (!oldPassword) return;
+  const newPassword = prompt("请输入新密码（至少 6 位）：");
+  if (!newPassword) return;
+  const resp = await fetch("/api/auth/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  alert(resp.ok ? "密码已修改" : body.error || "修改失败");
+});
+
+// ---------- 设置（保存到账户，Key 不回传浏览器） ----------
+
+let llmConfig = null;
+
+el.providerSelect.value = localStorage.getItem("magiccad.provider") || "anthropic";
+el.keySource.value = localStorage.getItem("magiccad.keySource") || "own";
+
+function applySettingsUI() {
+  const provider = el.providerSelect.value;
+  const shared = el.keySource.value === "shared";
+
+  el.anthropicSettings.hidden = shared || provider !== "anthropic";
+  el.openaiSettings.hidden = shared || provider !== "openai";
+  el.keyHint.hidden = shared;
+  el.sharedHint.hidden = !shared;
+
+  if (!llmConfig) return;
+  if (shared) {
+    const cfg = llmConfig.shared;
+    if (!cfg.allowed) {
+      el.sharedHint.textContent = "⚠ 你还未获得共享模型授权，请联系管理员开通。";
+    } else if (!cfg[provider]) {
+      el.sharedHint.textContent = "⚠ 管理员尚未启用该服务商的共享配置，请换一个服务商。";
+    } else {
+      el.sharedHint.textContent = "✓ 已授权使用平台共享模型，模型与 Key 由管理员统一配置。";
+    }
+  } else {
+    el.apiKey.placeholder = llmConfig.anthropic.hasKey
+      ? "已保存（输入新 Key 可覆盖）"
+      : "sk-ant-...";
+    el.openaiKey.placeholder = llmConfig.openai.hasKey
+      ? "已保存（输入新 Key 可覆盖）"
+      : "sk-...";
+  }
+}
+
+async function loadLlmConfig() {
+  const resp = await fetch("/api/llm/config");
+  if (!resp.ok) return;
+  llmConfig = await resp.json();
+
+  el.modelSelect.innerHTML = llmConfig.anthropic.models
+    .map((m) => `<option value="${m.id}">${m.label}</option>`)
+    .join("");
+  el.modelSelect.value = llmConfig.anthropic.model || llmConfig.anthropic.defaultModel;
+  el.openaiBaseUrl.value = llmConfig.openai.baseUrl;
+  el.openaiBaseUrl.placeholder = llmConfig.openai.defaultBaseUrl;
+  el.openaiModel.value = llmConfig.openai.model;
+  el.openaiModel.placeholder = llmConfig.openai.defaultModel;
+  applySettingsUI();
+}
+
+async function saveProviderConfig(provider, extra = {}) {
+  const base =
+    provider === "anthropic"
+      ? { model: el.modelSelect.value }
+      : { model: el.openaiModel.value.trim(), baseUrl: el.openaiBaseUrl.value.trim() };
+  try {
+    await fetch("/api/llm/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, ...base, ...extra }),
+    });
+  } catch {
+    setStatus("设置保存失败", "warn");
+  }
+}
+
+// Key 输入后立即保存到账户并清空输入框（不在浏览器留存）
+function bindKeyInput(input, provider) {
+  input.addEventListener("change", async () => {
+    const key = input.value.trim();
+    if (!key) return;
+    await saveProviderConfig(provider, { apiKey: key });
+    input.value = "";
+    if (llmConfig) llmConfig[provider].hasKey = true;
+    applySettingsUI();
+    setStatus("API Key 已保存到账户", "ok");
   });
 }
 
-bindSetting(el.apiKey, "magiccad.apiKey");
-bindSetting(el.openaiBaseUrl, "magiccad.openai.baseUrl");
-bindSetting(el.openaiModel, "magiccad.openai.model");
-bindSetting(el.openaiKey, "magiccad.openai.apiKey");
+bindKeyInput(el.apiKey, "anthropic");
+bindKeyInput(el.openaiKey, "openai");
 
-el.providerSelect.value = localStorage.getItem("magiccad.provider") || "anthropic";
-
-function applyProviderUI() {
-  const provider = el.providerSelect.value;
-  el.anthropicSettings.hidden = provider !== "anthropic";
-  el.openaiSettings.hidden = provider !== "openai";
-  const cfg = serverConfig?.[provider];
-  el.keyHint.textContent = cfg?.hasEnvKey
-    ? "已从环境变量读取 API Key，此处可留空"
-    : "Key 仅保存在本机浏览器中，并只发送给本地服务";
-}
+el.modelSelect.addEventListener("change", () => saveProviderConfig("anthropic"));
+el.openaiModel.addEventListener("change", () => saveProviderConfig("openai"));
+el.openaiBaseUrl.addEventListener("change", () => saveProviderConfig("openai"));
 
 el.providerSelect.addEventListener("change", () => {
   localStorage.setItem("magiccad.provider", el.providerSelect.value);
-  applyProviderUI();
+  applySettingsUI();
 });
-applyProviderUI();
 
-fetch("/api/config")
-  .then((r) => r.json())
-  .then((cfg) => {
-    serverConfig = cfg;
-    el.modelSelect.innerHTML = cfg.anthropic.models
-      .map((m) => `<option value="${m.id}">${m.label}</option>`)
-      .join("");
-    el.modelSelect.value =
-      localStorage.getItem("magiccad.model") || cfg.anthropic.defaultModel;
-    if (!el.openaiBaseUrl.value) el.openaiBaseUrl.placeholder = cfg.openai.defaultBaseUrl;
-    if (!el.openaiModel.value) el.openaiModel.placeholder = cfg.openai.defaultModel;
-    applyProviderUI();
-  })
-  .catch(() => setStatus("无法连接本地服务", "error"));
-
-el.modelSelect.addEventListener("change", () => {
-  localStorage.setItem("magiccad.model", el.modelSelect.value);
+el.keySource.addEventListener("change", () => {
+  localStorage.setItem("magiccad.keySource", el.keySource.value);
+  applySettingsUI();
 });
 
 function requestPayload() {
   const provider = el.providerSelect.value;
+  const payload = { provider, keySource: el.keySource.value };
   if (provider === "openai") {
-    return {
-      provider,
-      apiKey: el.openaiKey.value.trim() || undefined,
-      model: el.openaiModel.value.trim() || undefined,
-      baseUrl: el.openaiBaseUrl.value.trim() || undefined,
-    };
+    payload.model = el.openaiModel.value.trim() || undefined;
+    payload.baseUrl = el.openaiBaseUrl.value.trim() || undefined;
+  } else {
+    payload.model = el.modelSelect.value;
   }
-  return {
-    provider,
-    apiKey: el.apiKey.value.trim() || undefined,
-    model: el.modelSelect.value,
-  };
+  return payload;
 }
 
 // ---------- 聊天 ----------
@@ -185,6 +277,7 @@ async function sendMessage(text) {
 
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
+      if (resp.status === 401 && body.error === "请先登录") return gotoLogin();
       throw new Error(body.error || `请求失败（${resp.status}）`);
     }
 
@@ -257,6 +350,7 @@ function buildFromCode(code, { fromAI = false } = {}) {
     el.exportStl.disabled = !kinds.has3d;
     el.exportSvg.disabled = !kinds.has2d;
     el.exportDxf.disabled = !kinds.has2d;
+    el.shareWork.disabled = false;
     setStatus(
       `已生成 ${geometries.length} 个几何体（${[
         kinds.has3d ? "3D" : null,
@@ -276,6 +370,64 @@ function buildFromCode(code, { fromAI = false } = {}) {
     } else {
       addErrorCard(`代码执行出错：${err.message}`);
     }
+  }
+}
+
+// ---------- 分享到作品市场 ----------
+
+el.shareWork.addEventListener("click", () => {
+  if (!el.codeArea.value.trim()) return;
+  el.shareTitle.value = deriveTitle();
+  el.shareDesc.value = "";
+  el.shareError.hidden = true;
+  el.shareModal.hidden = false;
+  el.shareTitle.focus();
+});
+
+el.shareClose.addEventListener("click", () => (el.shareModal.hidden = true));
+el.shareModal.addEventListener("click", (e) => {
+  if (e.target === el.shareModal) el.shareModal.hidden = true;
+});
+
+el.shareForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  el.shareSubmit.disabled = true;
+  try {
+    const resp = await fetch("/api/works", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: el.shareTitle.value.trim(),
+        description: el.shareDesc.value.trim(),
+        code: el.codeArea.value,
+      }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(body.error || `发布失败（${resp.status}）`);
+    el.shareModal.hidden = true;
+    setStatus("已发布到作品市场", "ok");
+  } catch (err) {
+    el.shareError.textContent = err.message;
+    el.shareError.hidden = false;
+  } finally {
+    el.shareSubmit.disabled = false;
+  }
+});
+
+// 从作品市场「载入到工作台」带回的代码
+function loadPendingWork() {
+  const raw = localStorage.getItem("magiccad.pendingWork");
+  if (!raw) return;
+  localStorage.removeItem("magiccad.pendingWork");
+  try {
+    const { title, code } = JSON.parse(raw);
+    el.codeArea.value = code;
+    el.codePanel.classList.remove("collapsed");
+    el.codeToggle.textContent = "代码 ▾";
+    buildFromCode(code);
+    addBubble("assistant", `已载入市场作品「${title}」，可以直接修改代码，或继续用对话改进它。`);
+  } catch {
+    // 忽略损坏数据
   }
 }
 
@@ -483,7 +635,15 @@ function safeExport(fn) {
   }
 }
 
-addBubble(
-  "assistant",
-  "你好！我是 MagicCAD。用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。"
-);
+// ---------- 启动 ----------
+
+(async function start() {
+  if (!(await initAuth())) return;
+  applySettingsUI();
+  loadLlmConfig();
+  addBubble(
+    "assistant",
+    `你好，${state.me.username}！用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。做出满意的作品后，可以「分享到市场」给大家。`
+  );
+  loadPendingWork();
+})();

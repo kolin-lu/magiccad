@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>作品市场 — MagicCAD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="market-page">
+  <header id="market-topbar">
+    <h1 class="auth-brand">Magic<span>CAD</span> · 作品市场</h1>
+    <div class="spacer"></div>
+    <span id="market-user" class="market-user"></span>
+    <a href="/" class="btn-link">← 返回工作台</a>
+  </header>
+
+  <main id="market-main">
+    <div id="works-grid"></div>
+  </main>
+
+  <!-- 作品详情弹窗 -->
+  <div id="work-modal" class="modal-mask" hidden>
+    <div class="modal-card work-card">
+      <header>
+        <h2 id="work-title"></h2>
+        <button id="work-close" class="modal-close" title="关闭">×</button>
+      </header>
+      <div class="work-body">
+        <div id="work-preview"></div>
+        <div class="work-side">
+          <p id="work-meta" class="work-meta"></p>
+          <p id="work-desc" class="work-desc"></p>
+          <div class="work-actions">
+            <button id="work-like"></button>
+            <button id="work-load">载入到工作台</button>
+            <button id="work-delete" class="danger" hidden>删除作品</button>
+          </div>
+          <details class="work-code">
+            <summary>查看建模代码</summary>
+            <pre id="work-code"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="market.bundle.js"></script>
+</body>
+</html>
