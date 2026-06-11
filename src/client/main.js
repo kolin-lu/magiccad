@@ -86,6 +86,7 @@ const state = {
   geometries: [],
   busy: false,
   sessionId: null, // 当前会话 ID（首次生成成功后分配并持续保存）
+  activeJobId: null, // 正在进行的后台生成任务，供中止
   versions: [], // 代码版本快照 [{code, time}]
   auto2dView: false, // 当前视图是否因 2D 模型被自动切到顶视+正交
 };
@@ -307,9 +308,21 @@ function setStatus(text, kind = "") {
 
 function setBusy(busy) {
   state.busy = busy;
-  el.send.disabled = busy;
   el.input.disabled = busy;
-  el.send.textContent = busy ? "生成中…" : "发送";
+  // 生成中按钮变为「中止」，点击可终止服务端任务
+  el.send.disabled = false;
+  el.send.textContent = busy ? "■ 中止" : "发送";
+  el.send.classList.toggle("stop", busy);
+}
+
+async function cancelActiveJob() {
+  if (!state.activeJobId) return;
+  el.send.disabled = true; // 防重复点击，流结束后由 setBusy(false) 恢复
+  try {
+    await fetch(`/api/jobs/${state.activeJobId}/cancel`, { method: "POST" });
+  } catch {
+    el.send.disabled = false;
+  }
 }
 
 function extractCode(text) {
@@ -352,9 +365,11 @@ async function sendTurn(content) {
       throw new Error(body.error || `请求失败（${resp.status}）`);
     }
 
-    const visibleText = await consumeJobStream(body.jobId, assistantBubble);
+    state.activeJobId = body.jobId;
+    const { text: visibleText, aborted } = await consumeJobStream(body.jobId, assistantBubble);
     state.history.push({ role: "assistant", content: visibleText });
     applyAssistantResult(visibleText);
+    if (aborted) setStatus("已中止，保留了已生成的部分", "warn");
   } catch (err) {
     assistantBubble.remove();
     // 失败的轮次从历史中移除，避免污染上下文
@@ -364,6 +379,7 @@ async function sendTurn(content) {
     addErrorCard(err.message);
     setStatus("生成失败", "error");
   } finally {
+    state.activeJobId = null;
     setBusy(false);
   }
 }
@@ -413,6 +429,7 @@ async function consumeJobStream(jobId, assistantBubble) {
   const decoder = new TextDecoder();
   let buffer = "";
   let streamError = null;
+  let aborted = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -442,20 +459,24 @@ async function consumeJobStream(jobId, assistantBubble) {
         streamError = event.message;
       } else if (event.type === "done" && event.stopReason === "refusal") {
         streamError = "该请求被模型安全策略拒绝，请换一种描述方式。";
+      } else if (event.type === "done" && event.stopReason === "aborted") {
+        aborted = true;
       }
     }
   }
   if (streamError) throw new Error(streamError);
   // 思考内容（标签内或事件流）不写入历史、不回传模型
   const visibleText = stripThink(rawText);
-  if (!visibleText.trim()) throw new Error("模型没有返回内容，请重试。");
+  if (!visibleText.trim()) {
+    throw new Error(aborted ? "已中止生成" : "模型没有返回内容，请重试。");
+  }
 
   renderAssistant();
   for (const entry of segEls) {
     if (entry?.type === "think") entry.summary.textContent = "💭 思考过程";
   }
   if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
-  return visibleText;
+  return { text: visibleText, aborted };
 }
 
 /** 生成成功后的统一处理：提取代码、保存会话、构建模型 */
@@ -486,16 +507,19 @@ async function resumeActiveJob() {
   await loadSession(job.sessionId); // 会话里已含本轮用户消息
   setBusy(true);
   setStatus("正在续接后台生成…");
+  state.activeJobId = job.jobId;
   const assistantBubble = addBubble("assistant", "");
   try {
-    const visibleText = await consumeJobStream(job.jobId, assistantBubble);
+    const { text: visibleText, aborted } = await consumeJobStream(job.jobId, assistantBubble);
     state.history.push({ role: "assistant", content: visibleText });
     applyAssistantResult(visibleText);
+    if (aborted) setStatus("已中止，保留了已生成的部分", "warn");
   } catch (err) {
     assistantBubble.remove();
     addErrorCard(err.message);
     setStatus("生成失败", "error");
   } finally {
+    state.activeJobId = null;
     setBusy(false);
   }
 }
@@ -1254,6 +1278,10 @@ el.fileInput.addEventListener("change", () => {
 });
 
 el.send.addEventListener("click", () => {
+  if (state.busy) {
+    cancelActiveJob();
+    return;
+  }
   const text = el.input.value;
   el.input.value = "";
   sendMessage(text);
@@ -1267,6 +1295,7 @@ el.input.addEventListener("keydown", (e) => {
 });
 
 el.examples.addEventListener("click", (e) => {
+  if (state.busy) return;
   if (e.target.matches("[data-prompt]")) {
     el.input.value = e.target.dataset.prompt;
     el.send.click();

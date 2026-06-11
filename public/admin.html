@@ -62,6 +62,18 @@
       <p class="setting-note">
         勾选后，支持思考的模型（Claude 自适应思考、DeepSeek-R1 等推理模型）会把思考过程实时展示给用户（折叠在回答上方，不进入对话上下文）；不勾选则只输出最终结果。对自配 Key 和共享 Key 的用户都生效。
       </p>
+
+      <div class="effort-row">
+        <span class="effort-label">生成精度：</span>
+        <label><input type="radio" name="gen-effort" value="fast" /> 快速</label>
+        <label><input type="radio" name="gen-effort" value="balanced" /> 均衡（默认）</label>
+        <label><input type="radio" name="gen-effort" value="fine" /> 精细</label>
+        <span class="save-state" id="effort-state"></span>
+      </div>
+      <p class="setting-note">
+        快速：思考简短、模型从简（省略倒角等细节），出结果快、省 token；均衡：模型自行决定思考深度；精细：充分思考、细节丰富（倒角/圆角/高分段数），耗时与费用更高。
+        Claude 模型同时调整思考与精力参数；OpenAI 协议模型（含 DeepSeek-R1 等推理模型）通过提示词约束。对所有用户生效。
+      </p>
     </section>
 
     <section class="admin-section">
@@ -101,7 +113,27 @@
     async function loadSettings() {
       const s = await api("/api/admin/settings");
       $("#show-thinking").checked = s.showThinking;
+      const radio = document.querySelector(`input[name="gen-effort"][value="${s.genEffort}"]`);
+      if (radio) radio.checked = true;
     }
+
+    document.querySelectorAll('input[name="gen-effort"]').forEach((radio) => {
+      radio.addEventListener("change", async () => {
+        const state = $("#effort-state");
+        try {
+          await api("/api/admin/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ genEffort: radio.value }),
+          });
+          state.textContent = "✓ 已保存";
+          state.className = "save-state ok";
+        } catch (err) {
+          state.textContent = err.message;
+          state.className = "save-state error";
+        }
+      });
+    });
 
     $("#show-thinking").addEventListener("change", async (e) => {
       const state = $("#settings-state");

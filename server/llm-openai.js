@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { SYSTEM_PROMPT } from "./llm.js";
+import { SYSTEM_PROMPT, EFFORT_PROMPTS } from "./llm.js";
 
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o";
@@ -20,7 +20,7 @@ function toOpenAIContent(content) {
  * 事件格式与 Anthropic 路径一致：{type:'text'} / {type:'done'} / 抛错由上层统一处理。
  */
 export async function generateOpenAI(
-  { messages, apiKey, model, baseUrl, showThinking = false },
+  { messages, apiKey, model, baseUrl, showThinking = false, effort = "balanced", signal },
   onEvent
 ) {
   const client = new OpenAI({
@@ -28,14 +28,21 @@ export async function generateOpenAI(
     baseURL: baseUrl || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL,
   });
 
-  const stream = await client.chat.completions.create({
-    model: model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
-    stream: true,
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      ...messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
-    ],
-  });
+  // OpenAI 协议没有跨服务商通用的思考控制参数（DeepSeek-R1 等模型思考长度随机），
+  // 精度档位只能通过系统提示词约束
+  const system = SYSTEM_PROMPT + (EFFORT_PROMPTS[effort] || "");
+
+  const stream = await client.chat.completions.create(
+    {
+      model: model || process.env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL,
+      stream: true,
+      messages: [
+        { role: "system", content: system },
+        ...messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
+      ],
+    },
+    { signal }
+  );
 
   let finishReason = null;
   for await (const chunk of stream) {

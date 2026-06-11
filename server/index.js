@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
-import { generate, AVAILABLE_MODELS, DEFAULT_MODEL } from "./llm.js";
+import { generate, AVAILABLE_MODELS, DEFAULT_MODEL, normalizeEffort } from "./llm.js";
 import {
   generateOpenAI,
   DEFAULT_OPENAI_BASE_URL,
@@ -282,7 +282,10 @@ app.post("/api/generate", auth.requireAuth, (req, res) => {
   }
 
   const job = jobsMgr.create(req.user.id, sessionId);
+  job.controller = new AbortController(); // 供中止接口终止 LLM 调用
+  job.cancelled = false;
   const showThinking = db.settings.get("show_thinking") === "1";
+  const effort = normalizeEffort(db.settings.get("gen_effort"));
   const withImages = hasImages(messages);
   const llmMessages = limitImages(messages);
 
@@ -297,17 +300,30 @@ app.post("/api/generate", auth.requireAuth, (req, res) => {
             model: finalModel || undefined,
             baseUrl: finalBaseUrl || undefined,
             showThinking,
+            effort,
+            signal: job.controller.signal,
           },
           send
         );
       } else {
         await generate(
-          { messages: llmMessages, apiKey, model: finalModel || undefined, showThinking },
+          {
+            messages: llmMessages,
+            apiKey,
+            model: finalModel || undefined,
+            showThinking,
+            effort,
+            signal: job.controller.signal,
+          },
           send
         );
       }
     } catch (err) {
-      send({ type: "error", message: describeError(err, provider, withImages) });
+      if (job.cancelled) {
+        send({ type: "done", stopReason: "aborted" });
+      } else {
+        send({ type: "error", message: describeError(err, provider, withImages) });
+      }
     } finally {
       // 无论客户端是否在线，把回答正文落库（思考内容不入库）
       const fullText = job.events
@@ -327,6 +343,19 @@ app.post("/api/generate", auth.requireAuth, (req, res) => {
   })();
 
   res.json({ jobId: job.id, sessionId });
+});
+
+// 中止生成：终止服务端的 LLM 调用，已生成的部分照常落库
+app.post("/api/jobs/:id/cancel", auth.requireAuth, (req, res) => {
+  const job = jobsMgr.get(req.params.id);
+  if (!job || job.userId !== req.user.id) {
+    return res.status(404).json({ error: "任务不存在或已过期" });
+  }
+  if (job.status === "running" && !job.cancelled) {
+    job.cancelled = true;
+    job.controller?.abort();
+  }
+  res.json({ ok: true });
 });
 
 // 当前用户正在运行的任务（页面加载时用于续接）
@@ -455,12 +484,18 @@ app.delete("/api/admin/users/:id", auth.requireAdmin, (req, res) => {
 });
 
 app.get("/api/admin/settings", auth.requireAdmin, (_req, res) => {
-  res.json({ showThinking: db.settings.get("show_thinking") === "1" });
+  res.json({
+    showThinking: db.settings.get("show_thinking") === "1",
+    genEffort: normalizeEffort(db.settings.get("gen_effort")),
+  });
 });
 
 app.put("/api/admin/settings", auth.requireAdmin, (req, res) => {
   if (typeof req.body?.showThinking === "boolean") {
     db.settings.set("show_thinking", req.body.showThinking ? "1" : "0");
+  }
+  if (typeof req.body?.genEffort === "string") {
+    db.settings.set("gen_effort", normalizeEffort(req.body.genEffort));
   }
   res.json({ ok: true });
 });

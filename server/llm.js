@@ -8,6 +8,30 @@ export const AVAILABLE_MODELS = [
 
 export const DEFAULT_MODEL = "claude-opus-4-8";
 
+/** 生成精度档位 → 追加给系统提示词的要求（两类服务商通用，对推理模型是唯一可用的控制手段） */
+export const EFFORT_PROMPTS = {
+  fast: `
+
+## 生成精度要求（平台设定：快速）
+
+- 思考务必简短，直奔可行方案，不要反复推敲多种备选。
+- 建模代码从简：用基本体组合实现主体结构即可，省略倒角、圆角、纹理等装饰细节，分段数用默认值。
+- 优先快速给出可用结果，说明文字控制在一两句。`,
+  fine: `
+
+## 生成精度要求（平台设定：精细）
+
+- 可以充分思考，推敲结构分解与尺寸关系。
+- 建模尽量精细还原：包含倒角、圆角、过渡等细节特征，圆滑表面分段数给足（segments: 64 或更高）。
+- 关键尺寸推导要严谨（如齿轮分度圆、螺纹标准尺寸），说明里讲清设计依据。`,
+};
+
+const VALID_EFFORTS = new Set(["fast", "balanced", "fine"]);
+
+export function normalizeEffort(value) {
+  return VALID_EFFORTS.has(value) ? value : "balanced";
+}
+
 export const SYSTEM_PROMPT = `你是 MagicCAD 的建模引擎，一个把自然语言转换为参数化 CAD 模型的专家。
 
 用户用自然语言描述想要的 2D 图形或 3D 模型，你输出一段 JavaScript 建模代码。代码会在浏览器中通过 JSCAD (@jscad/modeling v2) 执行并实时渲染，3D 模型可导出 STL，2D 图形可导出 SVG/DXF。
@@ -97,21 +121,39 @@ function toAnthropicMessages(messages) {
 /**
  * 流式生成建模代码。onEvent 收到 {type:'text',text} / {type:'done',...} / {type:'error',message}
  */
-export async function generate({ messages, apiKey, model, showThinking = false }, onEvent) {
+export async function generate(
+  { messages, apiKey, model, showThinking = false, effort = "balanced", signal },
+  onEvent
+) {
   const client = buildClient(apiKey);
-  const stream = client.messages.stream({
-    model: model || DEFAULT_MODEL,
+  const finalModel = model || DEFAULT_MODEL;
+  // Haiku 不支持 output_config.effort 参数，只能用提示词控制
+  const isHaiku = finalModel.includes("haiku");
+
+  const params = {
+    model: finalModel,
     max_tokens: 32000,
-    thinking: { type: "adaptive" },
     system: [
       {
         type: "text",
         text: SYSTEM_PROMPT,
-        cache_control: { type: "ephemeral" },
+        cache_control: { type: "ephemeral" }, // 固定部分缓存，精度附加要求放后面不破坏缓存
       },
+      ...(EFFORT_PROMPTS[effort] ? [{ type: "text", text: EFFORT_PROMPTS[effort] }] : []),
     ],
     messages: toAnthropicMessages(messages),
-  });
+  };
+
+  // 快速档不开启思考；均衡/精细用自适应思考（4.6+ 唯一受支持的开启方式），
+  // 精细档对支持的模型再加大 effort
+  if (effort !== "fast") {
+    params.thinking = { type: "adaptive" };
+    if (effort === "fine" && !isHaiku) params.output_config = { effort: "max" };
+  } else if (!isHaiku) {
+    params.output_config = { effort: "low" };
+  }
+
+  const stream = client.messages.stream(params, { signal });
 
   // 管理员开启「显示思考过程」时，把 adaptive thinking 的思考增量也转发给前端
   if (showThinking) {

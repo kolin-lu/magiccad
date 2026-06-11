@@ -1266,3 +1266,26 @@ button.small { padding: 3px 10px; font-size: 12px; border-radius: 6px;
   white-space: nowrap;
   letter-spacing: 0;
 }
+
+/* ---------- 中止按钮 / 精度选项 ---------- */
+
+#send.stop { background: var(--error); }
+#send.stop:disabled { opacity: 0.5; }
+
+.effort-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+  font-size: 14px;
+}
+
+.effort-row .effort-label { color: var(--text-dim); }
+
+.effort-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
