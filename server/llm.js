@@ -58,12 +58,40 @@ function main(params) {
 
 用户会基于当前模型继续提出修改（"再加四个安装孔"、"圆角改大一点"）。每次都输出**完整的新代码**（不是 diff），在上一版代码基础上修改。
 
-如果收到「执行报错」的反馈，仔细阅读错误信息，修复后重新输出完整代码。`;
+如果收到「执行报错」的反馈，仔细阅读错误信息，修复后重新输出完整代码。
+
+## 图片输入
+
+用户可能上传图片（物体/零件的照片、图纸或截图，通常已框选出目标区域），要求据此建模：
+
+1. 先用一两句话说明你从图片中识别出的物体与主要结构特征。
+2. 明确说出尺寸假设：图片无法提供绝对尺寸——用户文字说明里给了尺寸就以其为准；否则自行设定一个合理的总体尺寸，按图中比例推算其余尺寸，并在说明里讲清楚（如「按外径 80mm 估算」）。
+3. 扁平轮廓类（Logo、垫片、板材切割件、图纸）输出 2D 几何体；立体物体输出 3D。
+4. 只重建主体结构与显著特征（孔、槽、凸台、圆角），忽略纹理、阴影、背景和无关物体。
+5. 关键尺寸照旧写成 main 开头的 const 常量，方便用户用参数面板校正比例。`;
 
 function buildClient(apiKey) {
   // 优先使用请求里用户在界面配置的 Key，否则回落到环境变量 ANTHROPIC_API_KEY
   if (apiKey) return new Anthropic({ apiKey });
   return new Anthropic();
+}
+
+/** 中立内容块（{type:'image',mediaType,data} / {type:'text',text}）→ Anthropic 消息格式 */
+function toAnthropicMessages(messages) {
+  return messages.map((m) => ({
+    role: m.role,
+    content:
+      typeof m.content === "string"
+        ? m.content
+        : m.content.map((b) =>
+            b.type === "image"
+              ? {
+                  type: "image",
+                  source: { type: "base64", media_type: b.mediaType, data: b.data },
+                }
+              : { type: "text", text: b.text }
+          ),
+  }));
 }
 
 /**
@@ -82,7 +110,7 @@ export async function generate({ messages, apiKey, model }, onEvent) {
         cache_control: { type: "ephemeral" },
       },
     ],
-    messages,
+    messages: toAnthropicMessages(messages),
   });
 
   stream.on("text", (delta) => onEvent({ type: "text", text: delta }));

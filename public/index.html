@@ -88,8 +88,8 @@
     <div id="toolbar">
       <span id="status">就绪</span>
       <div class="spacer"></div>
-      <button id="open-file" title="打开 STL 模型或 JSCAD 代码文件（也可直接拖入画布）">打开文件</button>
-      <input id="file-input" type="file" accept=".stl,.js" hidden />
+      <button id="open-file" title="打开 STL 模型、JSCAD 代码或图片（框选后 AI 识别建模），也可直接拖入画布">打开文件</button>
+      <input id="file-input" type="file" accept=".stl,.js,.png,.jpg,.jpeg,.webp" hidden />
       <button id="screenshot" disabled title="把当前画面保存为 PNG 图片">截图</button>
       <button id="share-work" disabled title="把当前模型发布到作品市场">分享到市场</button>
       <button id="export-stl" disabled>导出 STL（3D 打印）</button>
@@ -118,7 +118,7 @@
         </header>
         <div id="param-list"></div>
       </div>
-      <div id="drop-hint">松开以打开 .stl / .js 文件</div>
+      <div id="drop-hint">松开以打开 .stl / .js / 图片文件</div>
       <div id="capture-bar" hidden>
         <span>拖动调整视角（可用左上角工具栏切视图），满意后点「完成截图」</span>
         <button id="capture-done">✓ 完成截图</button>
@@ -148,6 +148,37 @@
         <button id="history-close" class="modal-close" title="关闭">×</button>
       </header>
       <div id="history-list"></div>
+    </div>
+  </div>
+
+  <div id="crop-modal" class="modal-mask" hidden>
+    <div class="modal-card crop-card">
+      <header>
+        <h2>框选要识别的区域</h2>
+        <button id="crop-close" class="modal-close" title="关闭">×</button>
+      </header>
+      <div class="crop-body">
+        <div id="crop-stage">
+          <canvas id="crop-canvas"></canvas>
+          <div id="crop-box" hidden>
+            <span class="crop-handle" data-pos="nw"></span>
+            <span class="crop-handle" data-pos="ne"></span>
+            <span class="crop-handle" data-pos="sw"></span>
+            <span class="crop-handle" data-pos="se"></span>
+          </div>
+        </div>
+        <div class="crop-controls">
+          <button id="crop-all" type="button">全选</button>
+          <span class="setting-note">拖动画出选框，拖动选框可移动，拖动四角可调整大小</span>
+        </div>
+        <label class="crop-hint-label">补充说明（强烈建议填写）
+          <textarea id="crop-hint" rows="2" maxlength="300"
+            placeholder="这是什么物体？关键尺寸？要 2D 还是 3D？例如：法兰盘照片，外径 80mm，要 3D 模型"></textarea>
+        </label>
+        <p class="setting-note">AI 只能从图片推断形状比例，绝对尺寸请在说明中给出，生成后也可用参数面板微调。</p>
+        <p id="crop-error" class="auth-error" hidden></p>
+        <button id="crop-submit">识别并建模</button>
+      </div>
     </div>
   </div>
 

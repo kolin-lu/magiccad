@@ -19,7 +19,7 @@ const db = createDB(path.join(__dirname, "..", "data"));
 const auth = createAuth(db);
 
 const app = express();
-app.use(express.json({ limit: "4mb" }));
+app.use(express.json({ limit: "10mb" })); // 需容纳带图片（base64）的对话
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use(auth.attachUser);
 
@@ -140,11 +140,70 @@ app.put("/api/llm/config", auth.requireAuth, (req, res) => {
 
 // ---------- 生成（流式 NDJSON） ----------
 
+// 消息内容块校验：string 或 [{type:'text',text} | {type:'image',mediaType,data(base64)}]
+const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const MAX_IMAGE_CHARS = 3_000_000; // base64 字符数，约 2.2MB 图片
+const MAX_BLOCKS_PER_MESSAGE = 8;
+const KEEP_RECENT_IMAGES = 2;
+
+function sanitizeMessages(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out = [];
+  for (const m of raw) {
+    if (!m || (m.role !== "user" && m.role !== "assistant")) return null;
+    if (typeof m.content === "string") {
+      out.push({ role: m.role, content: m.content });
+      continue;
+    }
+    if (!Array.isArray(m.content) || m.content.length === 0 || m.content.length > MAX_BLOCKS_PER_MESSAGE) {
+      return null;
+    }
+    const blocks = [];
+    for (const b of m.content) {
+      if (b?.type === "text" && typeof b.text === "string") {
+        blocks.push({ type: "text", text: b.text });
+      } else if (
+        b?.type === "image" &&
+        IMAGE_MEDIA_TYPES.has(b.mediaType) &&
+        typeof b.data === "string" &&
+        b.data.length > 0 &&
+        b.data.length <= MAX_IMAGE_CHARS &&
+        /^[A-Za-z0-9+/=]+$/.test(b.data)
+      ) {
+        blocks.push({ type: "image", mediaType: b.mediaType, data: b.data });
+      } else {
+        return null;
+      }
+    }
+    out.push({ role: m.role, content: blocks });
+  }
+  // 只保留最近几张图，更早的替换为占位文本（控制上下文 token 成本）
+  let kept = 0;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const c = out[i].content;
+    if (typeof c === "string") continue;
+    out[i].content = c.map((b) => {
+      if (b.type !== "image") return b;
+      kept += 1;
+      return kept <= KEEP_RECENT_IMAGES
+        ? b
+        : { type: "text", text: "〔此处原为一张参考图片，为节省上下文已省略〕" };
+    });
+  }
+  return out;
+}
+
+function hasImages(messages) {
+  return messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "image")
+  );
+}
+
 app.post("/api/generate", auth.requireAuth, async (req, res) => {
-  const { messages, provider = "anthropic", model, baseUrl, keySource = "own" } =
-    req.body || {};
-  if (!Array.isArray(messages) || messages.length === 0) {
-    return res.status(400).json({ error: "messages 不能为空" });
+  const { provider = "anthropic", model, baseUrl, keySource = "own" } = req.body || {};
+  const messages = sanitizeMessages(req.body?.messages);
+  if (!messages) {
+    return res.status(400).json({ error: "messages 为空或格式无效" });
   }
   if (!PROVIDERS.has(provider)) {
     return res.status(400).json({ error: "无效的服务商" });
@@ -197,7 +256,7 @@ app.post("/api/generate", auth.requireAuth, async (req, res) => {
       await generate({ messages, apiKey, model: finalModel || undefined }, send);
     }
   } catch (err) {
-    send({ type: "error", message: describeError(err, provider) });
+    send({ type: "error", message: describeError(err, provider, hasImages(messages)) });
   } finally {
     res.end();
   }
@@ -312,7 +371,12 @@ app.put("/api/admin/shared-config", auth.requireAdmin, (req, res) => {
 
 // ---------- 错误描述 ----------
 
-function describeError(err, provider) {
+function describeError(err, provider, withImages = false) {
+  // 带图请求被 OpenAI 协议服务拒绝，多半是模型不支持视觉输入
+  if (withImages && provider === "openai" && err instanceof OpenAI.BadRequestError) {
+    return "请求被拒绝：当前模型可能不支持图片输入，请在设置中换用支持视觉的模型（如 gpt-4o、qwen-vl-max）。";
+  }
+
   // Anthropic SDK 类型化异常
   if (err instanceof Anthropic.AuthenticationError) return "API Key 无效，请检查设置。";
   if (err instanceof Anthropic.RateLimitError) return "请求过于频繁（已触发限流），请稍后重试。";

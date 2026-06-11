@@ -67,6 +67,15 @@ const el = {
   historyClose: $("#history-close"),
   openFile: $("#open-file"),
   fileInput: $("#file-input"),
+  cropModal: $("#crop-modal"),
+  cropClose: $("#crop-close"),
+  cropStage: $("#crop-stage"),
+  cropCanvas: $("#crop-canvas"),
+  cropBox: $("#crop-box"),
+  cropAll: $("#crop-all"),
+  cropHint: $("#crop-hint"),
+  cropError: $("#crop-error"),
+  cropSubmit: $("#crop-submit"),
 };
 
 const viewer = new Viewer(el.viewport);
@@ -239,6 +248,38 @@ function addBubble(role, text = "") {
   return div;
 }
 
+/** 用户气泡：content 为字符串，或含图片的内容块数组（图片显示为缩略图） */
+function addUserBubble(content) {
+  if (typeof content === "string") return addBubble("user", content);
+  const div = document.createElement("div");
+  div.className = "bubble user";
+  for (const b of content) {
+    if (b.type === "image") {
+      const img = document.createElement("img");
+      img.className = "bubble-image";
+      img.src = `data:${b.mediaType};base64,${b.data}`;
+      img.alt = "上传的图片";
+      div.appendChild(img);
+    } else if (b.type === "text") {
+      const t = document.createElement("div");
+      t.textContent = b.text;
+      div.appendChild(t);
+    }
+  }
+  el.chat.appendChild(div);
+  el.chat.scrollTop = el.chat.scrollHeight;
+  return div;
+}
+
+/** 提取消息内容中的文字部分（内容块数组或字符串均可） */
+function contentText(content) {
+  if (typeof content === "string") return content;
+  return content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join(" ");
+}
+
 function addErrorCard(message, fixPrompt) {
   const card = document.createElement("div");
   card.className = "bubble error-card";
@@ -277,12 +318,18 @@ function extractCode(text) {
 }
 
 async function sendMessage(text) {
-  if (state.busy || !text.trim()) return;
+  if (!text.trim()) return;
+  return sendTurn(text);
+}
+
+/** 发送一轮用户消息。content 为字符串或内容块数组（含图片时） */
+async function sendTurn(content) {
+  if (state.busy) return;
   setBusy(true);
   setStatus("正在请求 AI…");
 
-  state.history.push({ role: "user", content: text });
-  addBubble("user", text);
+  state.history.push({ role: "user", content });
+  addUserBubble(content);
   const assistantBubble = addBubble("assistant", "…");
 
   let fullText = "";
@@ -479,7 +526,7 @@ document.addEventListener("keydown", (e) => {
     el.captureCancel.click();
     return;
   }
-  if (!el.historyModal.hidden || !el.shareModal.hidden) return;
+  if (!el.historyModal.hidden || !el.shareModal.hidden || !el.cropModal.hidden) return;
   const views = { 1: "iso", 2: "top", 3: "front", 4: "right" };
   const key = e.key.toLowerCase();
   if (views[key]) viewer.setStandardView(views[key]);
@@ -745,7 +792,8 @@ function loadPendingWork() {
 
 function deriveTitle() {
   const first = state.history.find((m) => m.role === "user");
-  return first ? first.content.slice(0, 40) : "未命名会话";
+  const text = first ? contentText(first.content).trim() : "";
+  return text ? text.slice(0, 40) : first ? "图片建模会话" : "未命名会话";
 }
 
 async function saveSession() {
@@ -837,7 +885,8 @@ async function loadSession(id) {
     state.history = session.messages || [];
     el.chat.innerHTML = "";
     for (const m of state.history) {
-      addBubble(m.role, m.role === "assistant" ? stripCodeForDisplay(m.content) : m.content);
+      if (m.role === "assistant") addBubble("assistant", stripCodeForDisplay(m.content));
+      else addUserBubble(m.content);
     }
 
     el.historyModal.hidden = true;
@@ -880,13 +929,178 @@ async function openLocalFile(file) {
       el.codePanel.classList.remove("collapsed");
       el.codeToggle.textContent = "代码 ▾";
       buildFromCode(code);
+    } else if (/\.(png|jpe?g|webp)$/.test(name)) {
+      openCropModal(file);
     } else {
-      setStatus("不支持的文件类型，请选择 .stl 或 .js 文件", "warn");
+      setStatus("不支持的文件类型，请选择 .stl / .js / 图片文件", "warn");
     }
   } catch (err) {
     setStatus(`打开文件失败：${err.message}`, "error");
   }
 }
+
+// ---------- 图片框选 → AI 识别建模 ----------
+
+const CROP_STAGE_W = 640;
+const CROP_STAGE_H = 400;
+const CROP_OUT_MAX = 1024; // 发给模型的图片最长边
+
+const crop = {
+  img: null, // 原图 Image
+  scale: 1, // 显示尺寸 / 原始尺寸
+  sel: null, // 选区（显示坐标）{x,y,w,h}
+  mode: null, // 'draw' | 'move' | null
+  origin: null, // draw 模式的固定角
+  moveStart: null,
+};
+
+function openCropModal(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    crop.img = img;
+    crop.scale = Math.min(
+      CROP_STAGE_W / img.naturalWidth,
+      CROP_STAGE_H / img.naturalHeight,
+      1
+    );
+    const w = Math.max(1, Math.round(img.naturalWidth * crop.scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * crop.scale));
+    el.cropCanvas.width = w;
+    el.cropCanvas.height = h;
+    el.cropCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    setCropSel({ x: 0, y: 0, w, h }); // 默认全选
+    el.cropHint.value = "";
+    el.cropError.hidden = true;
+    el.cropModal.hidden = false;
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus("图片加载失败", "error");
+  };
+  img.src = url;
+}
+
+/** 归一化（支持反向拖拽）并应用选区 */
+function setCropSel({ x, y, w, h }) {
+  const W = el.cropCanvas.width;
+  const H = el.cropCanvas.height;
+  const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+  const x1 = clamp(Math.min(x, x + w), 0, W);
+  const x2 = clamp(Math.max(x, x + w), 0, W);
+  const y1 = clamp(Math.min(y, y + h), 0, H);
+  const y2 = clamp(Math.max(y, y + h), 0, H);
+  crop.sel = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  Object.assign(el.cropBox.style, {
+    left: `${x1}px`,
+    top: `${y1}px`,
+    width: `${x2 - x1}px`,
+    height: `${y2 - y1}px`,
+  });
+  el.cropBox.hidden = false;
+}
+
+function cropPointer(e) {
+  const rect = el.cropCanvas.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+el.cropStage.addEventListener("pointerdown", (e) => {
+  if (!crop.img) return;
+  e.preventDefault();
+  const p = cropPointer(e);
+  const handle = e.target.closest?.(".crop-handle");
+  if (handle && crop.sel) {
+    // 拖角调整：固定对角，等同于从对角重新画
+    const s = crop.sel;
+    const anchors = {
+      nw: { x: s.x + s.w, y: s.y + s.h },
+      ne: { x: s.x, y: s.y + s.h },
+      sw: { x: s.x + s.w, y: s.y },
+      se: { x: s.x, y: s.y },
+    };
+    crop.mode = "draw";
+    crop.origin = anchors[handle.dataset.pos];
+  } else if (e.target === el.cropBox && crop.sel) {
+    crop.mode = "move";
+    crop.moveStart = { ...p, sel: { ...crop.sel } };
+  } else {
+    crop.mode = "draw";
+    crop.origin = p;
+    setCropSel({ x: p.x, y: p.y, w: 0, h: 0 });
+  }
+  el.cropStage.setPointerCapture(e.pointerId);
+});
+
+el.cropStage.addEventListener("pointermove", (e) => {
+  if (!crop.mode) return;
+  const p = cropPointer(e);
+  if (crop.mode === "draw") {
+    setCropSel({
+      x: crop.origin.x,
+      y: crop.origin.y,
+      w: p.x - crop.origin.x,
+      h: p.y - crop.origin.y,
+    });
+  } else if (crop.mode === "move") {
+    const W = el.cropCanvas.width;
+    const H = el.cropCanvas.height;
+    const s = crop.moveStart.sel;
+    const nx = Math.min(Math.max(s.x + p.x - crop.moveStart.x, 0), W - s.w);
+    const ny = Math.min(Math.max(s.y + p.y - crop.moveStart.y, 0), H - s.h);
+    setCropSel({ x: nx, y: ny, w: s.w, h: s.h });
+  }
+});
+
+el.cropStage.addEventListener("pointerup", () => (crop.mode = null));
+el.cropStage.addEventListener("pointercancel", () => (crop.mode = null));
+
+el.cropAll.addEventListener("click", () => {
+  setCropSel({ x: 0, y: 0, w: el.cropCanvas.width, h: el.cropCanvas.height });
+});
+
+el.cropClose.addEventListener("click", () => (el.cropModal.hidden = true));
+el.cropModal.addEventListener("click", (e) => {
+  if (e.target === el.cropModal) el.cropModal.hidden = true;
+});
+
+el.cropSubmit.addEventListener("click", () => {
+  const showError = (msg) => {
+    el.cropError.textContent = msg;
+    el.cropError.hidden = false;
+  };
+  if (state.busy) return showError("正在生成中，请稍候再试");
+  const s = crop.sel;
+  if (!s || s.w < 8 || s.h < 8) return showError("请先框选一个有效区域");
+
+  // 选区映射回原图坐标，裁剪并压缩到最长边 1024px 的 JPEG
+  const inv = 1 / crop.scale;
+  const sx = s.x * inv;
+  const sy = s.y * inv;
+  const sw = s.w * inv;
+  const sh = s.h * inv;
+  const outScale = Math.min(1, CROP_OUT_MAX / Math.max(sw, sh));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sw * outScale));
+  canvas.height = Math.max(1, Math.round(sh * outScale));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; // 透明 PNG 转 JPEG 时垫白底
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(crop.img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+
+  const hint = el.cropHint.value.trim();
+  const text = hint
+    ? `请根据这张图片建模。补充说明：${hint}`
+    : "请识别这张图片中的物体，生成对应的参数化模型（尺寸未知时自行估一个合理值并说明）。";
+
+  el.cropModal.hidden = true;
+  sendTurn([
+    { type: "image", mediaType: "image/jpeg", data: dataUrl.split(",")[1] },
+    { type: "text", text },
+  ]);
+});
 
 // ---------- 事件绑定 ----------
 
