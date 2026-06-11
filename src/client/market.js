@@ -53,6 +53,20 @@ function renderCard(w) {
   const card = document.createElement("div");
   card.className = "work-item";
 
+  let coverEl;
+  if (w.cover) {
+    coverEl = document.createElement("img");
+    coverEl.className = "cover";
+    coverEl.src = w.cover;
+    coverEl.alt = w.title;
+    coverEl.loading = "lazy";
+  } else {
+    coverEl = document.createElement("div");
+    coverEl.className = "cover placeholder";
+    coverEl.textContent = "◇";
+  }
+  coverEl.addEventListener("click", () => openWork(w.id));
+
   const title = document.createElement("div");
   title.className = "title";
   title.textContent = w.title;
@@ -88,7 +102,7 @@ function renderCard(w) {
   viewBtn.addEventListener("click", () => openWork(w.id));
 
   footer.append(likeBtn, viewBtn);
-  card.append(title, desc, meta, footer);
+  card.append(coverEl, title, desc, meta, footer);
   card.addEventListener("click", (e) => {
     if (e.target === card || e.target === title || e.target === desc || e.target === meta) {
       openWork(w.id);

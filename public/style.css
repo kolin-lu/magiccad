@@ -757,3 +757,245 @@ button.small { padding: 3px 10px; font-size: 12px; border-radius: 6px;
 }
 
 #user-table th { color: var(--text-dim); font-weight: 600; }
+
+/* ---------- 画布悬浮工具栏 ---------- */
+
+#viewport-hud {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(29, 33, 41, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  backdrop-filter: blur(4px);
+}
+
+#viewport-hud button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  padding: 4px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#viewport-hud button:hover { color: var(--text); border-color: var(--border); }
+#viewport-hud button.active { color: var(--accent); background: rgba(79, 157, 222, 0.12); }
+
+.hud-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 3px;
+}
+
+#grid-info {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  z-index: 5;
+  color: var(--text-dim);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* ---------- 参数面板 ---------- */
+
+#param-panel {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 5;
+  width: 250px;
+  max-height: calc(100% - 60px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(29, 33, 41, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+  overflow: hidden;
+}
+
+#param-panel[hidden] { display: none; }
+
+#param-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+#param-collapse {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+#param-collapse:hover { color: var(--text); }
+
+#param-panel.collapsed #param-list { display: none; }
+#param-panel.collapsed header { border-bottom: none; }
+
+#param-list {
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+}
+
+.param-row {
+  display: grid;
+  grid-template-columns: 76px 1fr 58px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+}
+
+.param-row label {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.param-row input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.param-row input[type="number"] {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 3px 5px;
+  font-size: 12px;
+}
+
+.param-row input[type="number"]:focus { outline: none; border-color: var(--accent); }
+
+/* ---------- 拖拽提示 ---------- */
+
+#drop-hint {
+  position: absolute;
+  inset: 14px;
+  z-index: 6;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: rgba(79, 157, 222, 0.08);
+  color: var(--accent);
+  font-size: 15px;
+  pointer-events: none;
+}
+
+#viewport.dropping #drop-hint { display: flex; }
+
+/* ---------- 代码面板：行号与版本 ---------- */
+
+#code-body {
+  flex: 1;
+  display: flex;
+  margin: 0 12px 12px;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #12151b;
+  overflow: hidden;
+}
+
+#code-body:focus-within { border-color: var(--accent); }
+
+#code-gutter {
+  width: 42px;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 10px 0;
+  background: #161a21;
+  border-right: 1px solid var(--border);
+  text-align: right;
+  user-select: none;
+}
+
+#code-gutter .ln {
+  padding-right: 8px;
+  color: #4a5366;
+  font-family: "JetBrains Mono", Consolas, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+#code-gutter .ln.err {
+  color: #fff;
+  background: rgba(224, 108, 108, 0.55);
+}
+
+#code-panel.collapsed #code-body { display: none; }
+
+#code-area {
+  flex: 1;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+#code-area:focus { outline: none; border: none; }
+
+#version-select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+/* ---------- 分享封面预览 ---------- */
+
+#share-cover-row { margin-top: 12px; }
+
+#share-cover {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ---------- 市场卡片封面 ---------- */
+
+.work-item .cover {
+  width: calc(100% + 32px);
+  margin: -14px -16px 0;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 11px 11px 0 0;
+  border-bottom: 1px solid var(--border);
+  background: #12151b;
+}
+
+.work-item .cover.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #313a4b;
+  font-size: 42px;
+}

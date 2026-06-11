@@ -25,16 +25,31 @@ const el = {
   changePassword: $("#change-password"),
   logout: $("#logout"),
   viewport: $("#viewport"),
+  hudGrid: $("#hud-grid"),
+  hudAxes: $("#hud-axes"),
+  hudWireframe: $("#hud-wireframe"),
+  hudProj: $("#hud-proj"),
+  hudFit: $("#hud-fit"),
+  gridInfo: $("#grid-info"),
+  paramPanel: $("#param-panel"),
+  paramList: $("#param-list"),
+  paramCollapse: $("#param-collapse"),
+  dropHint: $("#drop-hint"),
   codePanel: $("#code-panel"),
   codeArea: $("#code-area"),
+  codeGutter: $("#code-gutter"),
   codeToggle: $("#code-toggle"),
   runCode: $("#run-code"),
+  versionSelect: $("#version-select"),
+  screenshot: $("#screenshot"),
   shareWork: $("#share-work"),
   shareModal: $("#share-modal"),
   shareClose: $("#share-close"),
   shareForm: $("#share-form"),
   shareTitle: $("#share-title"),
   shareDesc: $("#share-desc"),
+  shareCoverRow: $("#share-cover-row"),
+  shareCover: $("#share-cover"),
   shareError: $("#share-error"),
   shareSubmit: $("#share-submit"),
   exportStl: $("#export-stl"),
@@ -58,6 +73,8 @@ const state = {
   geometries: [],
   busy: false,
   sessionId: null, // 当前会话 ID（首次生成成功后分配并持续保存）
+  versions: [], // 代码版本快照 [{code, time}]
+  auto2dView: false, // 当前视图是否因 2D 模型被自动切到顶视+正交
 };
 
 // ---------- 登录态 ----------
@@ -314,8 +331,11 @@ async function sendMessage(text) {
     state.history.push({ role: "assistant", content: fullText });
     assistantBubble.textContent = stripCodeForDisplay(fullText);
 
-    const code = extractCode(fullText);
-    if (code) el.codeArea.value = code.trim();
+    const code = extractCode(fullText)?.trim();
+    if (code) {
+      el.codeArea.value = code;
+      updateGutter();
+    }
     saveSession();
     if (!code) {
       setStatus("回复中没有建模代码", "warn");
@@ -342,26 +362,40 @@ function stripCodeForDisplay(text) {
 
 // ---------- 构建与渲染 ----------
 
-function buildFromCode(code, { fromAI = false } = {}) {
+function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false } = {}) {
   try {
     const { geometries, kinds } = runModelCode(code);
     state.geometries = geometries;
-    viewer.setGeometries(geometries);
+    const info = viewer.setGeometries(geometries);
     el.exportStl.disabled = !kinds.has3d;
     el.exportSvg.disabled = !kinds.has2d;
     el.exportDxf.disabled = !kinds.has2d;
     el.shareWork.disabled = false;
+    el.screenshot.disabled = false;
+
+    applyAutoView(kinds);
+    updateGridInfo(info.gridSpacing);
+    highlightErrorLine(null);
+    if (snapshot) pushVersion(code);
+    if (!quiet) renderParamPanel(code);
+
     setStatus(
       `已生成 ${geometries.length} 个几何体（${[
         kinds.has3d ? "3D" : null,
         kinds.has2d ? "2D" : null,
       ]
         .filter(Boolean)
-        .join(" + ")}）`,
+        .join(" + ")}）· ${formatDims(info.size, kinds)}`,
       "ok"
     );
+    return true;
   } catch (err) {
-    setStatus("代码执行出错", "error");
+    setStatus(
+      err.line ? `代码执行出错（第 ${err.line} 行）` : "代码执行出错",
+      "error"
+    );
+    highlightErrorLine(err.line);
+    if (quiet) return false;
     if (fromAI) {
       addErrorCard(
         `模型代码执行出错：${err.message}`,
@@ -370,16 +404,259 @@ function buildFromCode(code, { fromAI = false } = {}) {
     } else {
       addErrorCard(`代码执行出错：${err.message}`);
     }
+    return false;
   }
 }
 
+function formatDims(size, kinds) {
+  const fmt = (n) => (Math.round(n * 10) / 10).toString();
+  return kinds.has3d
+    ? `${fmt(size[0])} × ${fmt(size[1])} × ${fmt(size[2])} mm`
+    : `${fmt(size[0])} × ${fmt(size[1])} mm`;
+}
+
+/** 2D 图形自动切到顶视+正交，回到 3D 时还原透视等轴测 */
+function applyAutoView(kinds) {
+  if (kinds.has2d && !kinds.has3d) {
+    viewer.setProjection("ortho");
+    viewer.setStandardView("top");
+    state.auto2dView = true;
+  } else if (state.auto2dView) {
+    viewer.setProjection("persp");
+    viewer.setStandardView("iso");
+    state.auto2dView = false;
+  }
+  syncHud();
+}
+
+function updateGridInfo(spacing) {
+  const fmt = spacing >= 1 ? spacing.toString() : spacing.toFixed(1);
+  el.gridInfo.textContent = `网格 ${fmt} mm`;
+}
+
+// ---------- 画布工具栏 ----------
+
+function syncHud() {
+  el.hudGrid.classList.toggle("active", viewer.gridVisible);
+  el.hudAxes.classList.toggle("active", viewer.axesVisible);
+  el.hudWireframe.classList.toggle("active", viewer.wireframe);
+  el.hudProj.textContent = viewer.projection === "ortho" ? "正交" : "透视";
+}
+
+el.hudGrid.addEventListener("click", () => {
+  viewer.setGridVisible(!viewer.gridVisible);
+  syncHud();
+});
+el.hudAxes.addEventListener("click", () => {
+  viewer.setAxesVisible(!viewer.axesVisible);
+  syncHud();
+});
+el.hudWireframe.addEventListener("click", () => {
+  viewer.setWireframe(!viewer.wireframe);
+  syncHud();
+});
+el.hudProj.addEventListener("click", () => {
+  viewer.setProjection(viewer.projection === "ortho" ? "persp" : "ortho");
+  state.auto2dView = false;
+  syncHud();
+});
+el.hudFit.addEventListener("click", () => viewer.fitView());
+
+for (const name of ["iso", "top", "front", "right"]) {
+  $(`#hud-view-${name}`).addEventListener("click", () => viewer.setStandardView(name));
+}
+
+// 画布快捷键（输入框聚焦或弹窗打开时不响应）
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (!el.historyModal.hidden || !el.shareModal.hidden) return;
+  const views = { 1: "iso", 2: "top", 3: "front", 4: "right" };
+  const key = e.key.toLowerCase();
+  if (views[key]) viewer.setStandardView(views[key]);
+  else if (key === "f") viewer.fitView();
+  else if (key === "g") el.hudGrid.click();
+  else if (key === "a") el.hudAxes.click();
+  else if (key === "w") el.hudWireframe.click();
+  else if (key === "o") el.hudProj.click();
+});
+
+// ---------- 参数面板 ----------
+
+const MAX_PARAMS = 14;
+const PARAM_RE = /^[ \t]*const\s+([A-Za-z_$][\w$]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*;/gm;
+
+function extractParams(code) {
+  const params = [];
+  for (const m of code.matchAll(PARAM_RE)) {
+    params.push({ name: m[1], value: parseFloat(m[2]) });
+    if (params.length >= MAX_PARAMS) break;
+  }
+  return params;
+}
+
+function replaceParam(code, name, value) {
+  const escaped = name.replace(/\$/g, "\\$");
+  const re = new RegExp(`(const\\s+${escaped}\\s*=\\s*)-?\\d+(?:\\.\\d+)?(\\s*;)`);
+  return code.replace(re, `$1${value}$2`);
+}
+
+let paramRebuildTimer = null;
+
+function renderParamPanel(code) {
+  const params = extractParams(code);
+  el.paramPanel.hidden = params.length === 0;
+  el.paramList.innerHTML = "";
+  if (params.length === 0) return;
+
+  for (const p of params) {
+    const row = document.createElement("div");
+    row.className = "param-row";
+
+    const label = document.createElement("label");
+    label.textContent = p.name;
+    label.title = p.name;
+
+    const span = Math.abs(p.value) || 5;
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = p.value < 0 ? -span * 3 : 0;
+    slider.max = span * 3;
+    slider.step = Number.isInteger(p.value) && span >= 5 ? 1 : span / 100;
+    slider.value = p.value;
+
+    const num = document.createElement("input");
+    num.type = "number";
+    num.step = "any";
+    num.value = p.value;
+
+    const apply = (value, immediate) => {
+      if (!Number.isFinite(value)) return;
+      value = Math.round(value * 1000) / 1000; // 避免滑块步进产生超长小数写进代码
+      el.codeArea.value = replaceParam(el.codeArea.value, p.name, value);
+      updateGutter();
+      clearTimeout(paramRebuildTimer);
+      const rebuild = () => {
+        if (buildFromCode(el.codeArea.value, { snapshot: false, quiet: true })) {
+          if (state.sessionId) saveSession();
+        }
+      };
+      immediate ? rebuild() : (paramRebuildTimer = setTimeout(rebuild, 120));
+    };
+
+    slider.addEventListener("input", () => {
+      num.value = slider.value;
+      apply(parseFloat(slider.value), false);
+    });
+    num.addEventListener("change", () => {
+      slider.value = num.value;
+      apply(parseFloat(num.value), true);
+    });
+
+    row.append(label, slider, num);
+    el.paramList.appendChild(row);
+  }
+}
+
+el.paramCollapse.addEventListener("click", () => {
+  el.paramPanel.classList.toggle("collapsed");
+  el.paramCollapse.textContent = el.paramPanel.classList.contains("collapsed") ? "+" : "—";
+});
+
+// ---------- 版本快照 ----------
+
+const MAX_VERSIONS = 20;
+
+function pushVersion(code) {
+  const last = state.versions[state.versions.length - 1];
+  if (last && last.code === code) return;
+  state.versions.push({ code, time: new Date() });
+  if (state.versions.length > MAX_VERSIONS) state.versions.shift();
+  renderVersionSelect(state.versions.length - 1);
+}
+
+function renderVersionSelect(selected) {
+  el.versionSelect.hidden = state.versions.length < 2;
+  el.versionSelect.innerHTML = state.versions
+    .map((v, i) => {
+      const t = `${String(v.time.getHours()).padStart(2, "0")}:${String(v.time.getMinutes()).padStart(2, "0")}`;
+      return `<option value="${i}">V${i + 1} · ${t}</option>`;
+    })
+    .join("");
+  el.versionSelect.value = String(selected);
+}
+
+el.versionSelect.addEventListener("change", () => {
+  const v = state.versions[Number(el.versionSelect.value)];
+  if (!v) return;
+  el.codeArea.value = v.code;
+  updateGutter();
+  buildFromCode(v.code, { snapshot: false });
+  setStatus(`已回退到 V${Number(el.versionSelect.value) + 1}`, "ok");
+});
+
+// ---------- 代码面板：行号 / 错误行 / 快捷键 ----------
+
+let errorLine = null;
+
+function updateGutter() {
+  const lines = el.codeArea.value.split("\n").length;
+  let html = "";
+  for (let i = 1; i <= lines; i++) {
+    html += `<div class="ln${i === errorLine ? " err" : ""}">${i}</div>`;
+  }
+  el.codeGutter.innerHTML = html;
+  el.codeGutter.scrollTop = el.codeArea.scrollTop;
+}
+
+function highlightErrorLine(line) {
+  errorLine = line || null;
+  updateGutter();
+  if (errorLine) {
+    el.codePanel.classList.remove("collapsed");
+    el.codeToggle.textContent = "代码 ▾";
+    // 把出错行滚动到可视范围
+    const lineHeight = parseFloat(getComputedStyle(el.codeArea).lineHeight) || 18;
+    el.codeArea.scrollTop = Math.max(0, (errorLine - 4) * lineHeight);
+    el.codeGutter.scrollTop = el.codeArea.scrollTop;
+  }
+}
+
+el.codeArea.addEventListener("input", updateGutter);
+el.codeArea.addEventListener("scroll", () => {
+  el.codeGutter.scrollTop = el.codeArea.scrollTop;
+});
+
+el.codeArea.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    el.runCode.click();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    el.codeArea.setRangeText("  ", el.codeArea.selectionStart, el.codeArea.selectionEnd, "end");
+    updateGutter();
+  }
+});
+
 // ---------- 分享到作品市场 ----------
+
+let pendingCover = "";
 
 el.shareWork.addEventListener("click", () => {
   if (!el.codeArea.value.trim()) return;
   el.shareTitle.value = deriveTitle();
   el.shareDesc.value = "";
   el.shareError.hidden = true;
+  // 当前画布截图作为作品封面
+  try {
+    pendingCover = viewer.screenshot({ width: 480, type: "image/jpeg", quality: 0.85 });
+    el.shareCover.src = pendingCover;
+    el.shareCoverRow.hidden = false;
+  } catch {
+    pendingCover = "";
+    el.shareCoverRow.hidden = true;
+  }
   el.shareModal.hidden = false;
   el.shareTitle.focus();
 });
@@ -400,6 +677,7 @@ el.shareForm.addEventListener("submit", async (e) => {
         title: el.shareTitle.value.trim(),
         description: el.shareDesc.value.trim(),
         code: el.codeArea.value,
+        cover: pendingCover,
       }),
     });
     const body = await resp.json().catch(() => ({}));
@@ -422,6 +700,7 @@ function loadPendingWork() {
   try {
     const { title, code } = JSON.parse(raw);
     el.codeArea.value = code;
+    updateGutter();
     el.codePanel.classList.remove("collapsed");
     el.codeToggle.textContent = "代码 ▾";
     buildFromCode(code);
@@ -531,10 +810,13 @@ async function loadSession(id) {
     }
 
     el.historyModal.hidden = true;
+    state.versions = [];
     if (session.code) {
       el.codeArea.value = session.code;
+      updateGutter();
       buildFromCode(session.code);
     } else {
+      el.versionSelect.hidden = true;
       setStatus("已载入会话", "ok");
     }
   } catch (err) {
@@ -548,15 +830,22 @@ async function openLocalFile(file) {
   const name = file.name.toLowerCase();
   try {
     if (name.endsWith(".stl")) {
-      viewer.showSTL(await file.arrayBuffer());
+      const info = viewer.showSTL(await file.arrayBuffer());
       state.geometries = [];
       el.exportStl.disabled = true;
       el.exportSvg.disabled = true;
       el.exportDxf.disabled = true;
-      setStatus(`已打开 ${file.name}（查看模式，导出不可用）`, "ok");
+      el.screenshot.disabled = false;
+      updateGridInfo(info.gridSpacing);
+      const fmt = (n) => (Math.round(n * 10) / 10).toString();
+      setStatus(
+        `已打开 ${file.name}（查看模式，导出不可用）· ${fmt(info.size[0])} × ${fmt(info.size[1])} × ${fmt(info.size[2])} mm`,
+        "ok"
+      );
     } else if (name.endsWith(".js")) {
       const code = await file.text();
       el.codeArea.value = code;
+      updateGutter();
       el.codePanel.classList.remove("collapsed");
       el.codeToggle.textContent = "代码 ▾";
       buildFromCode(code);
@@ -606,6 +895,8 @@ el.examples.addEventListener("click", (e) => {
 el.clearChat.addEventListener("click", () => {
   state.history = [];
   state.sessionId = null;
+  state.versions = [];
+  el.versionSelect.hidden = true;
   el.chat.innerHTML = "";
   addBubble("assistant", "已开启新会话。描述你想要的模型吧！");
 });
@@ -620,6 +911,31 @@ el.codeToggle.addEventListener("click", () => {
 el.runCode.addEventListener("click", () => {
   buildFromCode(el.codeArea.value);
   if (state.sessionId) saveSession();
+});
+
+// 拖拽 .stl / .js 文件到画布直接打开
+el.viewport.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  el.viewport.classList.add("dropping");
+});
+el.viewport.addEventListener("dragleave", (e) => {
+  if (e.target === el.viewport || e.target === el.dropHint) {
+    el.viewport.classList.remove("dropping");
+  }
+});
+el.viewport.addEventListener("drop", (e) => {
+  e.preventDefault();
+  el.viewport.classList.remove("dropping");
+  const file = e.dataTransfer.files?.[0];
+  if (file) openLocalFile(file);
+});
+
+el.screenshot.addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = viewer.screenshot();
+  a.download = `magiccad-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
+  a.click();
+  setStatus("已保存截图", "ok");
 });
 
 el.exportStl.addEventListener("click", () => safeExport(() => exportSTL(state.geometries)));
@@ -641,6 +957,9 @@ function safeExport(fn) {
   if (!(await initAuth())) return;
   applySettingsUI();
   loadLlmConfig();
+  syncHud();
+  updateGutter();
+  updateGridInfo(viewer.gridSpacing);
   addBubble(
     "assistant",
     `你好，${state.me.username}！用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。做出满意的作品后，可以「分享到市场」给大家。`

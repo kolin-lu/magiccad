@@ -215,18 +215,27 @@ app.get("/api/works/:id", auth.requireAuth, (req, res) => {
   res.json(work);
 });
 
+// 封面为画布截图的 data URL，限制格式与体积
+const COVER_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/;
+const COVER_MAX_LENGTH = 500_000;
+
 app.post("/api/works", auth.requireAuth, (req, res) => {
-  const { title, description, code } = req.body || {};
+  const { title, description, code, cover } = req.body || {};
   if (!title || typeof title !== "string" || !title.trim()) {
     return res.status(400).json({ error: "请填写作品标题" });
   }
   if (!code || typeof code !== "string" || !code.trim()) {
     return res.status(400).json({ error: "没有可分享的建模代码" });
   }
+  const validCover =
+    typeof cover === "string" && cover.length <= COVER_MAX_LENGTH && COVER_RE.test(cover)
+      ? cover
+      : "";
   const id = db.works.create(req.user.id, {
     title: title.trim(),
     description: typeof description === "string" ? description.trim() : "",
     code,
+    cover: validCover,
   });
   res.json({ id });
 });

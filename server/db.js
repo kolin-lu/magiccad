@@ -62,6 +62,7 @@ export function createDB(dataDir) {
       title       TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       code        TEXT NOT NULL,
+      cover       TEXT NOT NULL DEFAULT '',
       created_at  TEXT NOT NULL
     );
 
@@ -71,6 +72,12 @@ export function createDB(dataDir) {
       PRIMARY KEY (work_id, user_id)
     );
   `);
+
+  // 旧库迁移：works 表补充封面列
+  const workCols = db.prepare("PRAGMA table_info(works)").all();
+  if (!workCols.some((c) => c.name === "cover")) {
+    db.exec("ALTER TABLE works ADD COLUMN cover TEXT NOT NULL DEFAULT ''");
+  }
 
   const now = () => new Date().toISOString();
 
@@ -282,7 +289,7 @@ export function createDB(dataDir) {
     list(viewerId) {
       return db
         .prepare(
-          `SELECT w.id, w.title, w.description, w.created_at, w.user_id,
+          `SELECT w.id, w.title, w.description, w.cover, w.created_at, w.user_id,
                   u.username AS author,
                   (SELECT COUNT(*) FROM work_likes l WHERE l.work_id = w.id) AS likes,
                   EXISTS(SELECT 1 FROM work_likes l WHERE l.work_id = w.id AND l.user_id = ?) AS liked
@@ -303,16 +310,17 @@ export function createDB(dataDir) {
         .get(viewerId, id);
       return r ? { ...publicWork(r, viewerId), code: r.code } : null;
     },
-    create(userId, { title, description, code }) {
+    create(userId, { title, description, code, cover }) {
       const r = db
         .prepare(
-          "INSERT INTO works (user_id, title, description, code, created_at) VALUES (?, ?, ?, ?, ?)"
+          "INSERT INTO works (user_id, title, description, code, cover, created_at) VALUES (?, ?, ?, ?, ?, ?)"
         )
         .run(
           userId,
           String(title).slice(0, 80),
           String(description || "").slice(0, 500),
           String(code),
+          String(cover || ""),
           now()
         );
       return Number(r.lastInsertRowid);
@@ -342,6 +350,7 @@ export function createDB(dataDir) {
       id: r.id,
       title: r.title,
       description: r.description,
+      cover: r.cover || "",
       author: r.author,
       createdAt: r.created_at,
       likes: r.likes,

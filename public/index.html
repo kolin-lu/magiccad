@@ -88,24 +88,51 @@
     <div id="toolbar">
       <span id="status">就绪</span>
       <div class="spacer"></div>
-      <button id="open-file" title="打开 STL 模型或 JSCAD 代码文件">打开文件</button>
+      <button id="open-file" title="打开 STL 模型或 JSCAD 代码文件（也可直接拖入画布）">打开文件</button>
       <input id="file-input" type="file" accept=".stl,.js" hidden />
+      <button id="screenshot" disabled title="把当前画面保存为 PNG 图片">截图</button>
       <button id="share-work" disabled title="把当前模型发布到作品市场">分享到市场</button>
       <button id="export-stl" disabled>导出 STL（3D 打印）</button>
       <button id="export-svg" disabled>导出 SVG</button>
       <button id="export-dxf" disabled>导出 DXF</button>
     </div>
 
-    <div id="viewport"></div>
+    <div id="viewport">
+      <div id="viewport-hud">
+        <button id="hud-grid" class="active" title="显示/隐藏网格（G）">网格</button>
+        <button id="hud-axes" class="active" title="显示/隐藏坐标轴（A）">轴</button>
+        <button id="hud-wireframe" title="线框/着色模式（W）">线框</button>
+        <button id="hud-proj" title="透视/正交投影切换（O）">透视</button>
+        <span class="hud-sep"></span>
+        <button id="hud-view-iso" title="等轴测视图（1）">等轴</button>
+        <button id="hud-view-top" title="顶视图（2）">顶</button>
+        <button id="hud-view-front" title="前视图（3）">前</button>
+        <button id="hud-view-right" title="右视图（4）">右</button>
+        <button id="hud-fit" title="适应视图（F）">⤢</button>
+      </div>
+      <div id="grid-info"></div>
+      <div id="param-panel" hidden>
+        <header>
+          <span>参数调节</span>
+          <button id="param-collapse" title="收起/展开">—</button>
+        </header>
+        <div id="param-list"></div>
+      </div>
+      <div id="drop-hint">松开以打开 .stl / .js 文件</div>
+    </div>
 
     <div id="code-panel" class="collapsed">
       <div id="code-header">
         <button id="code-toggle">代码 ▴</button>
         <span class="hint">可手动修改参数后重新运行</span>
+        <select id="version-select" title="版本快照，选择可回退" hidden></select>
         <div class="spacer"></div>
-        <button id="run-code">▶ 运行</button>
+        <button id="run-code" title="运行（Ctrl+Enter）">▶ 运行</button>
       </div>
-      <textarea id="code-area" spellcheck="false" placeholder="AI 生成的 JSCAD 建模代码会显示在这里"></textarea>
+      <div id="code-body">
+        <div id="code-gutter"></div>
+        <textarea id="code-area" spellcheck="false" placeholder="AI 生成的 JSCAD 建模代码会显示在这里"></textarea>
+      </div>
     </div>
   </main>
 
@@ -132,6 +159,10 @@
         <label>简介（可选）
           <textarea id="share-desc" rows="3" maxlength="500" placeholder="一句话介绍：用途、尺寸、打印建议…"></textarea>
         </label>
+        <div id="share-cover-row" hidden>
+          <span class="setting-note">封面（当前画布截图）</span>
+          <img id="share-cover" alt="作品封面预览" />
+        </div>
         <p class="setting-note">将发布当前代码面板中的建模代码，所有用户可见、可载入。</p>
         <p id="share-error" class="auth-error" hidden></p>
         <button id="share-submit" type="submit">发布</button>
