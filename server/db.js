@@ -20,7 +20,7 @@ export function createDB(dataDir) {
       username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
       password_hash  TEXT NOT NULL,
       role           TEXT NOT NULL DEFAULT 'user',   -- 'admin' | 'user'
-      shared_allowed INTEGER NOT NULL DEFAULT 0,     -- 是否被授权使用平台共享模型
+      shared_allowed INTEGER NOT NULL DEFAULT 1,     -- 是否可用平台共享模型（新用户默认开启，管理员可取消）
       created_at     TEXT NOT NULL
     );
 
@@ -101,9 +101,10 @@ export function createDB(dataDir) {
 
   const users = {
     create(username, password, role = "user") {
+      // 新用户默认开启共享模型授权，管理员可在后台逐个取消
       const r = db
         .prepare(
-          "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)"
+          "INSERT INTO users (username, password_hash, role, shared_allowed, created_at) VALUES (?, ?, ?, 1, ?)"
         )
         .run(username, hashPassword(password), role, now());
       return users.byId(r.lastInsertRowid);

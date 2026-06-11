@@ -216,7 +216,7 @@ app.post("/api/generate", auth.requireAuth, async (req, res) => {
   if (keySource === "shared") {
     // 平台共享配置：由管理员配置并逐个授权使用，Key 不离开服务端
     if (!req.user.shared_allowed && req.user.role !== "admin") {
-      return res.status(403).json({ error: "你还未获得平台共享模型的使用授权，请联系管理员。" });
+      return res.status(403).json({ error: "你的共享模型使用权已被管理员关闭，请使用自己的 API Key 或联系管理员。" });
     }
     const shared = db.llm.sharedConfig(provider);
     if (!shared?.enabled || !shared?.api_key) {

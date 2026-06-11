@@ -147,7 +147,7 @@ function applySettingsUI() {
   if (shared) {
     const cfg = llmConfig.shared;
     if (!cfg.allowed) {
-      el.sharedHint.textContent = "⚠ 你还未获得共享模型授权，请联系管理员开通。";
+      el.sharedHint.textContent = "⚠ 你的共享模型使用权已被管理员关闭，请使用自己的 API Key 或联系管理员。";
     } else if (!cfg[provider]) {
       el.sharedHint.textContent = "⚠ 管理员尚未启用该服务商的共享配置，请换一个服务商。";
     } else {
