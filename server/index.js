@@ -11,12 +11,14 @@ import {
 } from "./llm-openai.js";
 import { createDB } from "./db.js";
 import { createAuth, publicUser } from "./auth.js";
+import { createJobManager } from "./jobs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 5173;
 
 const db = createDB(path.join(__dirname, "..", "data"));
 const auth = createAuth(db);
+const jobsMgr = createJobManager();
 
 const app = express();
 app.use(express.json({ limit: "10mb" })); // 需容纳带图片（base64）的对话
@@ -177,20 +179,34 @@ function sanitizeMessages(raw) {
     }
     out.push({ role: m.role, content: blocks });
   }
-  // 只保留最近几张图，更早的替换为占位文本（控制上下文 token 成本）
+  return out;
+}
+
+/** 发给模型的副本：只保留最近几张图，更早的替换为占位文本（控制 token 成本）。不修改入参 */
+function limitImages(messages) {
   let kept = 0;
-  for (let i = out.length - 1; i >= 0; i--) {
-    const c = out[i].content;
-    if (typeof c === "string") continue;
-    out[i].content = c.map((b) => {
+  const out = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (typeof m.content === "string") {
+      out.unshift(m);
+      continue;
+    }
+    const blocks = m.content.map((b) => {
       if (b.type !== "image") return b;
       kept += 1;
       return kept <= KEEP_RECENT_IMAGES
         ? b
         : { type: "text", text: "〔此处原为一张参考图片，为节省上下文已省略〕" };
     });
+    out.unshift({ role: m.role, content: blocks });
   }
   return out;
+}
+
+/** 去掉模型混在正文里的 <think> 内容，得到应入库的回答正文 */
+function stripThink(text) {
+  return text.replace(/<think>[\s\S]*?(<\/think>|$)/g, "").trim();
 }
 
 function hasImages(messages) {
@@ -199,11 +215,17 @@ function hasImages(messages) {
   );
 }
 
-app.post("/api/generate", auth.requireAuth, async (req, res) => {
-  const { provider = "anthropic", model, baseUrl, keySource = "own" } = req.body || {};
+// 创建后台生成任务：任务独立于连接运行，结果自动落库到会话，
+// 客户端通过 /api/jobs/:id/stream 旁听（断开可重连回放）
+app.post("/api/generate", auth.requireAuth, (req, res) => {
+  const { provider = "anthropic", model, baseUrl, keySource = "own", sessionId, title } =
+    req.body || {};
   const messages = sanitizeMessages(req.body?.messages);
   if (!messages) {
     return res.status(400).json({ error: "messages 为空或格式无效" });
+  }
+  if (typeof sessionId !== "string" || !sessionId) {
+    return res.status(400).json({ error: "缺少会话 ID" });
   }
   if (!PROVIDERS.has(provider)) {
     return res.status(400).json({ error: "无效的服务商" });
@@ -240,36 +262,109 @@ app.post("/api/generate", auth.requireAuth, async (req, res) => {
     finalBaseUrl = finalBaseUrl || cfg?.base_url || "";
   }
 
+  // 每用户同时只允许一个生成任务
+  const running = jobsMgr.activeFor(req.user.id);
+  if (running) {
+    return res
+      .status(409)
+      .json({ error: "已有正在进行的生成任务", jobId: running.id, sessionId: running.sessionId });
+  }
+
+  // 先把含本轮用户消息的完整会话落库——即使页面随后关闭，会话也是完整的
+  try {
+    db.chats.save(req.user.id, sessionId, {
+      title: title || "未命名会话",
+      messages,
+      code: db.chats.get(req.user.id, sessionId)?.code || "",
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const job = jobsMgr.create(req.user.id, sessionId);
+  const showThinking = db.settings.get("show_thinking") === "1";
+  const withImages = hasImages(messages);
+  const llmMessages = limitImages(messages);
+
+  (async () => {
+    const send = (event) => jobsMgr.push(job, event);
+    try {
+      if (provider === "openai") {
+        await generateOpenAI(
+          {
+            messages: llmMessages,
+            apiKey,
+            model: finalModel || undefined,
+            baseUrl: finalBaseUrl || undefined,
+            showThinking,
+          },
+          send
+        );
+      } else {
+        await generate(
+          { messages: llmMessages, apiKey, model: finalModel || undefined, showThinking },
+          send
+        );
+      }
+    } catch (err) {
+      send({ type: "error", message: describeError(err, provider, withImages) });
+    } finally {
+      // 无论客户端是否在线，把回答正文落库（思考内容不入库）
+      const fullText = job.events
+        .filter((e) => e.type === "text")
+        .map((e) => e.text)
+        .join("");
+      const visible = stripThink(fullText);
+      if (visible) {
+        try {
+          db.chats.appendAssistant(job.userId, job.sessionId, visible);
+        } catch {
+          // 落库失败不影响任务结束
+        }
+      }
+      jobsMgr.finish(job);
+    }
+  })();
+
+  res.json({ jobId: job.id, sessionId });
+});
+
+// 当前用户正在运行的任务（页面加载时用于续接）
+app.get("/api/jobs/active", auth.requireAuth, (req, res) => {
+  const job = jobsMgr.activeFor(req.user.id);
+  res.json(job ? { jobId: job.id, sessionId: job.sessionId } : { jobId: null });
+});
+
+// 旁听任务事件流：先回放全量缓存，再续实时；断开重连不丢内容
+app.get("/api/jobs/:id/stream", auth.requireAuth, (req, res) => {
+  const job = jobsMgr.get(req.params.id);
+  if (!job || job.userId !== req.user.id) {
+    return res.status(404).json({ error: "任务不存在或已过期" });
+  }
+
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("X-Accel-Buffering", "no");
 
-  const send = (event) => res.write(JSON.stringify(event) + "\n");
-  const showThinking = db.settings.get("show_thinking") === "1";
-
-  try {
-    if (provider === "openai") {
-      await generateOpenAI(
-        {
-          messages,
-          apiKey,
-          model: finalModel || undefined,
-          baseUrl: finalBaseUrl || undefined,
-          showThinking,
-        },
-        send
-      );
-    } else {
-      await generate(
-        { messages, apiKey, model: finalModel || undefined, showThinking },
-        send
-      );
+  let idx = 0;
+  const flush = () => {
+    while (idx < job.events.length) {
+      res.write(JSON.stringify(job.events[idx++]) + "\n");
     }
-  } catch (err) {
-    send({ type: "error", message: describeError(err, provider, hasImages(messages)) });
-  } finally {
-    res.end();
-  }
+  };
+
+  flush();
+  if (job.status !== "running") return res.end();
+
+  const onUpdate = () => {
+    flush();
+    if (job.status !== "running") {
+      job.listeners.delete(onUpdate);
+      res.end();
+    }
+  };
+  job.listeners.add(onUpdate);
+  req.on("close", () => job.listeners.delete(onUpdate));
 });
 
 // ---------- 作品市场 ----------

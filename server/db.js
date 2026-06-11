@@ -240,6 +240,15 @@ export function createDB(dataDir) {
           .changes > 0
       );
     },
+    /** 后台任务完成后把助手回复追加进会话，并同步提取建模代码 */
+    appendAssistant(userId, id, text) {
+      const s = chats.get(userId, id);
+      if (!s) return;
+      s.messages.push({ role: "assistant", content: text });
+      const blocks = [...text.matchAll(/```(?:javascript|js)?\s*\n([\s\S]*?)```/g)];
+      const code = blocks.length ? blocks[blocks.length - 1][1].trim() : s.code;
+      chats.save(userId, id, { title: s.title, messages: s.messages, code });
+    },
   };
 
   // ---------- 大模型配置 ----------

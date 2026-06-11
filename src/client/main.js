@@ -328,9 +328,48 @@ async function sendTurn(content) {
   setBusy(true);
   setStatus("正在请求 AI…");
 
+  // 提前分配会话 ID：服务端在任务开始时就把会话落库，关页也不丢
+  if (!state.sessionId) state.sessionId = crypto.randomUUID();
   state.history.push({ role: "user", content });
   addUserBubble(content);
   const assistantBubble = addBubble("assistant", "");
+
+  try {
+    const resp = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: state.sessionId,
+        title: deriveTitle(),
+        messages: state.history,
+        ...requestPayload(),
+      }),
+    });
+
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (resp.status === 401 && body.error === "请先登录") return gotoLogin();
+      throw new Error(body.error || `请求失败（${resp.status}）`);
+    }
+
+    const visibleText = await consumeJobStream(body.jobId, assistantBubble);
+    state.history.push({ role: "assistant", content: visibleText });
+    applyAssistantResult(visibleText);
+  } catch (err) {
+    assistantBubble.remove();
+    // 失败的轮次从历史中移除，避免污染上下文
+    if (state.history[state.history.length - 1]?.role === "user") {
+      state.history.pop();
+    }
+    addErrorCard(err.message);
+    setStatus("生成失败", "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+/** 旁听后台任务的事件流并渲染到气泡。成功返回回答正文，失败抛错 */
+async function consumeJobStream(jobId, assistantBubble) {
   const placeholderDiv = document.createElement("div");
   placeholderDiv.textContent = "…";
   assistantBubble.appendChild(placeholderDiv);
@@ -340,7 +379,6 @@ async function sendTurn(content) {
   // 2) 模型在正文里输出的 <think>...</think> → 每对标签一个独立折叠块
   let eventThinking = null;
   const segEls = []; // <think> 分段对应的 DOM（分段只增不减，末段内容会持续更新）
-
   let rawText = "";
 
   const renderAssistant = () => {
@@ -363,87 +401,98 @@ async function sendTurn(content) {
     });
     el.chat.scrollTop = el.chat.scrollHeight;
   };
-  try {
-    const resp = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        messages: state.history,
-        ...requestPayload(),
-      }),
-    });
 
-    if (!resp.ok) {
-      const body = await resp.json().catch(() => ({}));
-      if (resp.status === 401 && body.error === "请先登录") return gotoLogin();
-      throw new Error(body.error || `请求失败（${resp.status}）`);
-    }
+  const resp = await fetch(`/api/jobs/${jobId}/stream`);
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error(body.error || `连接生成任务失败（${resp.status}）`);
+  }
 
-    // 解析 NDJSON 流
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let streamError = null;
+  // 解析 NDJSON 流（先回放任务已产生的事件，再续实时）
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamError = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const event = JSON.parse(line);
-        if (event.type === "thinking") {
-          if (!eventThinking) {
-            eventThinking = createAssistantSegment("think");
-            eventThinking.text = "";
-            assistantBubble.insertBefore(eventThinking.root, assistantBubble.firstChild);
-          }
-          eventThinking.text += event.text;
-          eventThinking.body.textContent = eventThinking.text;
-          el.chat.scrollTop = el.chat.scrollHeight;
-          setStatus("AI 正在思考…");
-        } else if (event.type === "text") {
-          rawText += event.text;
-          if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
-          renderAssistant();
-          setStatus("AI 正在生成模型代码…");
-        } else if (event.type === "error") {
-          streamError = event.message;
-        } else if (event.type === "done" && event.stopReason === "refusal") {
-          streamError = "该请求被模型安全策略拒绝，请换一种描述方式。";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.type === "thinking") {
+        if (!eventThinking) {
+          eventThinking = createAssistantSegment("think");
+          eventThinking.text = "";
+          assistantBubble.insertBefore(eventThinking.root, assistantBubble.firstChild);
         }
+        eventThinking.text += event.text;
+        eventThinking.body.textContent = eventThinking.text;
+        el.chat.scrollTop = el.chat.scrollHeight;
+        setStatus("AI 正在思考…");
+      } else if (event.type === "text") {
+        rawText += event.text;
+        if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
+        renderAssistant();
+        setStatus("AI 正在生成模型代码…");
+      } else if (event.type === "error") {
+        streamError = event.message;
+      } else if (event.type === "done" && event.stopReason === "refusal") {
+        streamError = "该请求被模型安全策略拒绝，请换一种描述方式。";
       }
     }
-    if (streamError) throw new Error(streamError);
-    // 思考内容（标签内或事件流）不写入历史、不回传模型
-    const visibleText = stripThink(rawText);
-    if (!visibleText.trim()) throw new Error("模型没有返回内容，请重试。");
+  }
+  if (streamError) throw new Error(streamError);
+  // 思考内容（标签内或事件流）不写入历史、不回传模型
+  const visibleText = stripThink(rawText);
+  if (!visibleText.trim()) throw new Error("模型没有返回内容，请重试。");
 
+  renderAssistant();
+  for (const entry of segEls) {
+    if (entry?.type === "think") entry.summary.textContent = "💭 思考过程";
+  }
+  if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
+  return visibleText;
+}
+
+/** 生成成功后的统一处理：提取代码、保存会话、构建模型 */
+function applyAssistantResult(visibleText) {
+  const code = extractCode(visibleText)?.trim();
+  if (code) {
+    el.codeArea.value = code;
+    updateGutter();
+  }
+  saveSession();
+  if (!code) {
+    setStatus("回复中没有建模代码", "warn");
+    return;
+  }
+  buildFromCode(code, { fromAI: true });
+}
+
+/** 页面加载时续接仍在运行的后台任务（上次关页前未完成的生成） */
+async function resumeActiveJob() {
+  let job;
+  try {
+    job = await (await fetch("/api/jobs/active")).json();
+  } catch {
+    return;
+  }
+  if (!job?.jobId) return;
+
+  await loadSession(job.sessionId); // 会话里已含本轮用户消息
+  setBusy(true);
+  setStatus("正在续接后台生成…");
+  const assistantBubble = addBubble("assistant", "");
+  try {
+    const visibleText = await consumeJobStream(job.jobId, assistantBubble);
     state.history.push({ role: "assistant", content: visibleText });
-    renderAssistant();
-    for (const entry of segEls) {
-      if (entry?.type === "think") entry.summary.textContent = "💭 思考过程";
-    }
-
-    const code = extractCode(visibleText)?.trim();
-    if (code) {
-      el.codeArea.value = code;
-      updateGutter();
-    }
-    saveSession();
-    if (!code) {
-      setStatus("回复中没有建模代码", "warn");
-      return;
-    }
-    buildFromCode(code, { fromAI: true });
+    applyAssistantResult(visibleText);
   } catch (err) {
     assistantBubble.remove();
-    // 失败的轮次从历史中移除，避免污染上下文
-    if (state.history[state.history.length - 1]?.role === "user") {
-      state.history.pop();
-    }
     addErrorCard(err.message);
     setStatus("生成失败", "error");
   } finally {
@@ -1309,4 +1358,5 @@ function safeExport(fn) {
     `你好，${state.me.username}！用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。做出满意的作品后，可以「分享到市场」给大家。`
   );
   loadPendingWork();
+  resumeActiveJob(); // 若有上次关页前未完成的生成任务，自动续接
 })();
