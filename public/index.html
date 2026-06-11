@@ -11,6 +11,7 @@
     <header id="brand">
       <h1>Magic<span>CAD</span></h1>
       <div class="brand-actions">
+        <a href="/market.html" class="btn-like" title="作品市场">市场</a>
         <button id="history-btn" title="查看历史会话">历史</button>
         <button id="clear-chat" title="新会话">新会话</button>
       </div>
@@ -33,6 +34,15 @@
 
     <details id="settings">
       <summary>⚙ 设置（服务商 / 模型 / API Key）</summary>
+
+      <label>API Key 来源
+        <select id="key-source">
+          <option value="own">我自己的 API Key</option>
+          <option value="shared">平台共享（需管理员授权）</option>
+        </select>
+      </label>
+      <p id="shared-hint" class="setting-note" hidden></p>
+
       <label>AI 服务商
         <select id="provider-select">
           <option value="anthropic">Anthropic Claude</option>
@@ -62,44 +72,143 @@
         <p class="setting-note">兼容 OpenAI / DeepSeek / 通义千问 / Moonshot / 本地 Ollama、vLLM 等任何 OpenAI 协议服务，Base URL 一般以 /v1 结尾</p>
       </div>
 
-      <p id="key-hint">Key 仅保存在本机浏览器中，并只发送给本地服务</p>
+      <p id="key-hint">Key 加密保存在你的账户中，仅用于服务端调用</p>
     </details>
+
+    <div id="user-bar">
+      <span id="user-name">…</span>
+      <div class="spacer"></div>
+      <a id="admin-link" href="/admin.html" hidden>管理后台</a>
+      <button id="change-password" title="修改密码">改密</button>
+      <button id="logout">退出</button>
+    </div>
   </aside>
 
   <main id="main">
     <div id="toolbar">
       <span id="status">就绪</span>
       <div class="spacer"></div>
-      <button id="open-file" title="打开 STL 模型或 JSCAD 代码文件">打开文件</button>
-      <input id="file-input" type="file" accept=".stl,.js" hidden />
+      <button id="open-file" title="打开 STL 模型、JSCAD 代码或图片（框选后 AI 识别建模），也可直接拖入画布">打开文件</button>
+      <input id="file-input" type="file" accept=".stl,.js,.png,.jpg,.jpeg,.webp" hidden />
+      <button id="screenshot" disabled title="把当前画面保存为 PNG 图片">截图</button>
+      <button id="share-work" disabled title="把当前模型发布到作品市场">分享到市场</button>
       <button id="export-stl" disabled>导出 STL（3D 打印）</button>
       <button id="export-svg" disabled>导出 SVG</button>
       <button id="export-dxf" disabled>导出 DXF</button>
     </div>
 
-    <div id="viewport"></div>
+    <div id="viewport">
+      <div id="viewport-hud">
+        <button id="hud-grid" class="active" title="显示/隐藏网格（G）">网格</button>
+        <button id="hud-axes" class="active" title="显示/隐藏坐标轴（A）">轴</button>
+        <button id="hud-wireframe" title="线框/着色模式（W）">线框</button>
+        <button id="hud-proj" title="透视/正交投影切换（O）">透视</button>
+        <span class="hud-sep"></span>
+        <button id="hud-view-iso" title="等轴测视图（1）">等轴</button>
+        <button id="hud-view-top" title="顶视图（2）">顶</button>
+        <button id="hud-view-front" title="前视图（3）">前</button>
+        <button id="hud-view-right" title="右视图（4）">右</button>
+        <button id="hud-fit" title="适应视图（F）">⤢</button>
+      </div>
+      <div id="grid-info"></div>
+      <div id="param-panel" hidden>
+        <header>
+          <span>参数调节</span>
+          <button id="param-collapse" title="收起/展开">—</button>
+        </header>
+        <div id="param-list"></div>
+      </div>
+      <div id="drop-hint">松开以打开 .stl / .js / 图片文件</div>
+      <div id="capture-bar" hidden>
+        <span>拖动调整视角（可用左上角工具栏切视图），满意后点「完成截图」</span>
+        <button id="capture-done">✓ 完成截图</button>
+        <button id="capture-cancel">取消</button>
+      </div>
+    </div>
 
     <div id="code-panel" class="collapsed">
       <div id="code-header">
         <button id="code-toggle">代码 ▴</button>
         <span class="hint">可手动修改参数后重新运行</span>
+        <select id="version-select" title="版本快照，选择可回退" hidden></select>
         <div class="spacer"></div>
-        <button id="run-code">▶ 运行</button>
+        <button id="run-code" title="运行（Ctrl+Enter）">▶ 运行</button>
       </div>
-      <textarea id="code-area" spellcheck="false" placeholder="AI 生成的 JSCAD 建模代码会显示在这里"></textarea>
+      <div id="code-body">
+        <div id="code-gutter"></div>
+        <textarea id="code-area" spellcheck="false" placeholder="AI 生成的 JSCAD 建模代码会显示在这里"></textarea>
+      </div>
     </div>
   </main>
 
-  <div id="history-modal" hidden>
-    <div id="history-card">
+  <div id="history-modal" class="modal-mask" hidden>
+    <div id="history-card" class="modal-card">
       <header>
         <h2>历史会话</h2>
-        <button id="history-close" title="关闭">×</button>
+        <button id="history-close" class="modal-close" title="关闭">×</button>
       </header>
       <div id="history-list"></div>
     </div>
   </div>
 
-  <script type="module" src="bundle.js"></script>
+  <div id="crop-modal" class="modal-mask" hidden>
+    <div class="modal-card crop-card">
+      <header>
+        <h2>框选要识别的区域</h2>
+        <button id="crop-close" class="modal-close" title="关闭">×</button>
+      </header>
+      <div class="crop-body">
+        <div id="crop-stage">
+          <canvas id="crop-canvas"></canvas>
+          <div id="crop-box" hidden>
+            <span class="crop-handle" data-pos="nw"></span>
+            <span class="crop-handle" data-pos="ne"></span>
+            <span class="crop-handle" data-pos="sw"></span>
+            <span class="crop-handle" data-pos="se"></span>
+          </div>
+        </div>
+        <div class="crop-controls">
+          <button id="crop-all" type="button">全选</button>
+          <span class="setting-note">拖动画出选框，拖动选框可移动，拖动四角可调整大小</span>
+        </div>
+        <label class="crop-hint-label">补充说明（强烈建议填写）
+          <textarea id="crop-hint" rows="2" maxlength="300"
+            placeholder="这是什么物体？关键尺寸？要 2D 还是 3D？例如：法兰盘照片，外径 80mm，要 3D 模型"></textarea>
+        </label>
+        <p class="setting-note">AI 只能从图片推断形状比例，绝对尺寸请在说明中给出，生成后也可用参数面板微调。</p>
+        <p id="crop-error" class="auth-error" hidden></p>
+        <button id="crop-submit">识别并建模</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="share-modal" class="modal-mask" hidden>
+    <div class="modal-card share-card">
+      <header>
+        <h2>分享到作品市场</h2>
+        <button id="share-close" class="modal-close" title="关闭">×</button>
+      </header>
+      <form id="share-form">
+        <label>作品标题
+          <input id="share-title" type="text" maxlength="80" required placeholder="给作品起个名字" />
+        </label>
+        <label>简介（可选）
+          <textarea id="share-desc" rows="3" maxlength="500" placeholder="一句话介绍：用途、尺寸、打印建议…"></textarea>
+        </label>
+        <div id="share-cover-row" hidden>
+          <div class="cover-row-head">
+            <span class="setting-note">封面（当前画布截图）</span>
+            <button id="share-recapture" type="button" title="回到画布调整视角后重新截图">调整视角重拍</button>
+          </div>
+          <img id="share-cover" alt="作品封面预览" />
+        </div>
+        <p class="setting-note">将发布当前代码面板中的建模代码，所有用户可见、可载入。</p>
+        <p id="share-error" class="auth-error" hidden></p>
+        <button id="share-submit" type="submit">发布</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="main.bundle.js"></script>
 </body>
 </html>

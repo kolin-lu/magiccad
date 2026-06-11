@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 — MagicCAD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <div id="auth-card">
+    <h1 class="auth-brand">Magic<span>CAD</span></h1>
+    <p class="auth-sub">自然语言生成 2D/3D 模型</p>
+
+    <div class="auth-tabs">
+      <button id="tab-login" class="active">登录</button>
+      <button id="tab-register">注册</button>
+    </div>
+
+    <form id="auth-form">
+      <label>用户名
+        <input id="username" type="text" autocomplete="username" maxlength="20"
+               placeholder="3-20 位字母、数字、下划线" required />
+      </label>
+      <label>密码
+        <input id="password" type="password" autocomplete="current-password"
+               placeholder="至少 6 位" required />
+      </label>
+      <label id="confirm-row" hidden>确认密码
+        <input id="password2" type="password" autocomplete="new-password" />
+      </label>
+      <p id="auth-error" class="auth-error" hidden></p>
+      <button id="auth-submit" type="submit">登录</button>
+    </form>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    let mode = "login";
+
+    // 已登录则直接进入工作台
+    fetch("/api/me").then((r) => { if (r.ok) location.href = "/"; });
+
+    function setMode(m) {
+      mode = m;
+      $("#tab-login").classList.toggle("active", m === "login");
+      $("#tab-register").classList.toggle("active", m === "register");
+      $("#confirm-row").hidden = m === "login";
+      $("#password2").required = m === "register";
+      $("#auth-submit").textContent = m === "login" ? "登录" : "注册";
+      $("#auth-error").hidden = true;
+    }
+    $("#tab-login").addEventListener("click", () => setMode("login"));
+    $("#tab-register").addEventListener("click", () => setMode("register"));
+
+    $("#auth-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const username = $("#username").value.trim();
+      const password = $("#password").value;
+      if (mode === "register" && password !== $("#password2").value) {
+        return showError("两次输入的密码不一致");
+      }
+      $("#auth-submit").disabled = true;
+      try {
+        const resp = await fetch(`/api/auth/${mode}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.error || `请求失败（${resp.status}）`);
+        location.href = "/";
+      } catch (err) {
+        showError(err.message);
+        $("#auth-submit").disabled = false;
+      }
+    });
+
+    function showError(msg) {
+      const el = $("#auth-error");
+      el.textContent = msg;
+      el.hidden = false;
+    }
+  </script>
+</body>
+</html>

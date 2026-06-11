@@ -5,7 +5,7 @@
   "type": "module",
   "main": "server/index.js",
   "scripts": {
-    "build": "esbuild src/client/main.js --bundle --format=esm --outfile=public/bundle.js --minify",
+    "build": "esbuild src/client/main.js src/client/market.js --bundle --format=esm --outdir=public --entry-names=[name].bundle --minify",
     "dev": "npm run build && node server/index.js",
     "start": "npm run build && node server/index.js"
   },

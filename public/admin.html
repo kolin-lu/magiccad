@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理后台 — MagicCAD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="market-page">
+  <header id="market-topbar">
+    <h1 class="auth-brand">Magic<span>CAD</span> · 管理后台</h1>
+    <div class="spacer"></div>
+    <a href="/market.html" class="btn-link">作品市场</a>
+    <a href="/" class="btn-link">← 返回工作台</a>
+  </header>
+
+  <main id="admin-main">
+    <section class="admin-section">
+      <h2>平台共享模型配置</h2>
+      <p class="setting-note">
+        在这里配置平台统一的大模型 API Key。被授权的用户在工作台设置中选择「平台共享」即可使用，Key 不会下发到浏览器。
+      </p>
+      <div class="admin-shared-grid">
+        <form class="shared-form" data-provider="anthropic">
+          <h3>Anthropic Claude</h3>
+          <label class="check-row"><input type="checkbox" name="enabled" /> 启用</label>
+          <label>API Key
+            <input type="password" name="apiKey" placeholder="sk-ant-..." autocomplete="off" />
+          </label>
+          <label>模型
+            <input type="text" name="model" placeholder="claude-opus-4-8" autocomplete="off" />
+          </label>
+          <button type="submit">保存</button>
+          <span class="save-state"></span>
+        </form>
+
+        <form class="shared-form" data-provider="openai">
+          <h3>OpenAI 协议（兼容接口）</h3>
+          <label class="check-row"><input type="checkbox" name="enabled" /> 启用</label>
+          <label>Base URL
+            <input type="text" name="baseUrl" placeholder="https://api.openai.com/v1" autocomplete="off" />
+          </label>
+          <label>API Key
+            <input type="password" name="apiKey" placeholder="sk-..." autocomplete="off" />
+          </label>
+          <label>模型
+            <input type="text" name="model" placeholder="gpt-4o / deepseek-chat …" autocomplete="off" />
+          </label>
+          <button type="submit">保存</button>
+          <span class="save-state"></span>
+        </form>
+      </div>
+    </section>
+
+    <section class="admin-section">
+      <h2>用户管理</h2>
+      <table id="user-table">
+        <thead>
+          <tr>
+            <th>用户名</th><th>角色</th><th>作品数</th><th>注册时间</th>
+            <th>共享模型授权</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+
+    async function api(url, options) {
+      const resp = await fetch(url, options);
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.error || `请求失败（${resp.status}）`);
+      return body;
+    }
+
+    async function init() {
+      try {
+        const { user } = await api("/api/me");
+        if (user.role !== "admin") { location.href = "/"; return; }
+      } catch { location.href = "/login.html"; return; }
+      await Promise.all([loadSharedConfig(), loadUsers()]);
+    }
+
+    // ---------- 共享模型配置 ----------
+
+    async function loadSharedConfig() {
+      const cfg = await api("/api/admin/shared-config");
+      for (const form of document.querySelectorAll(".shared-form")) {
+        const c = cfg[form.dataset.provider];
+        form.enabled.checked = c.enabled;
+        form.model.value = c.model;
+        if (form.baseUrl) form.baseUrl.value = c.baseUrl;
+        form.apiKey.placeholder = c.hasKey ? "已保存（留空表示不修改）" : form.apiKey.placeholder;
+      }
+    }
+
+    document.querySelectorAll(".shared-form").forEach((form) => {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const state = form.querySelector(".save-state");
+        try {
+          await api("/api/admin/shared-config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              provider: form.dataset.provider,
+              enabled: form.enabled.checked,
+              // 留空表示保留现有 Key
+              apiKey: form.apiKey.value.trim() || null,
+              model: form.model.value.trim(),
+              baseUrl: form.baseUrl ? form.baseUrl.value.trim() : "",
+            }),
+          });
+          form.apiKey.value = "";
+          state.textContent = "✓ 已保存";
+          state.className = "save-state ok";
+          loadSharedConfig();
+        } catch (err) {
+          state.textContent = err.message;
+          state.className = "save-state error";
+        }
+      });
+    });
+
+    // ---------- 用户管理 ----------
+
+    async function loadUsers() {
+      const users = await api("/api/admin/users");
+      const tbody = $("#user-table tbody");
+      tbody.innerHTML = "";
+      for (const u of users) {
+        const tr = document.createElement("tr");
+
+        const tds = [u.username, u.role === "admin" ? "管理员" : "用户",
+                     String(u.workCount), formatTime(u.createdAt)].map((text) => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          return td;
+        });
+
+        const tdShared = document.createElement("td");
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = u.sharedAllowed || u.role === "admin";
+        toggle.disabled = u.role === "admin"; // 管理员始终可用
+        toggle.addEventListener("change", async () => {
+          try {
+            await api(`/api/admin/users/${u.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sharedAllowed: toggle.checked }),
+            });
+          } catch (err) {
+            toggle.checked = !toggle.checked;
+            alert(err.message);
+          }
+        });
+        tdShared.appendChild(toggle);
+
+        const tdOps = document.createElement("td");
+        if (u.role !== "admin") {
+          const del = document.createElement("button");
+          del.className = "danger small";
+          del.textContent = "删除";
+          del.addEventListener("click", async () => {
+            if (!confirm(`删除用户「${u.username}」？其会话历史与作品将一并删除。`)) return;
+            try {
+              await api(`/api/admin/users/${u.id}`, { method: "DELETE" });
+              tr.remove();
+            } catch (err) {
+              alert(err.message);
+            }
+          });
+          tdOps.appendChild(del);
+        }
+
+        tr.append(...tds, tdShared, tdOps);
+        tbody.appendChild(tr);
+      }
+    }
+
+    function formatTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

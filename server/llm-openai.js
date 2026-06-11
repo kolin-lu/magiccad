@@ -4,6 +4,16 @@ import { SYSTEM_PROMPT } from "./llm.js";
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 export const DEFAULT_OPENAI_MODEL = "gpt-4o";
 
+/** 中立内容块（{type:'image',mediaType,data} / {type:'text',text}）→ OpenAI 消息内容 */
+function toOpenAIContent(content) {
+  if (typeof content === "string") return content;
+  return content.map((b) =>
+    b.type === "image"
+      ? { type: "image_url", image_url: { url: `data:${b.mediaType};base64,${b.data}` } }
+      : { type: "text", text: b.text }
+  );
+}
+
 /**
  * 通过 OpenAI 协议（chat completions）流式生成建模代码。
  * 兼容任何 OpenAI 协议服务：OpenAI 官方、DeepSeek、通义千问、Moonshot、本地 Ollama/vLLM 等。
@@ -20,7 +30,7 @@ export async function generateOpenAI({ messages, apiKey, model, baseUrl }, onEve
     stream: true,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ...messages.map((m) => ({ role: m.role, content: toOpenAIContent(m.content) })),
     ],
   });
 
