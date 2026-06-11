@@ -50,6 +50,10 @@ const el = {
   shareDesc: $("#share-desc"),
   shareCoverRow: $("#share-cover-row"),
   shareCover: $("#share-cover"),
+  shareRecapture: $("#share-recapture"),
+  captureBar: $("#capture-bar"),
+  captureDone: $("#capture-done"),
+  captureCancel: $("#capture-cancel"),
   shareError: $("#share-error"),
   shareSubmit: $("#share-submit"),
   exportStl: $("#export-stl"),
@@ -471,6 +475,10 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const tag = e.target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+  if (!el.captureBar.hidden && e.key === "Escape") {
+    el.captureCancel.click();
+    return;
+  }
   if (!el.historyModal.hidden || !el.shareModal.hidden) return;
   const views = { 1: "iso", 2: "top", 3: "front", 4: "right" };
   const key = e.key.toLowerCase();
@@ -664,6 +672,29 @@ el.shareWork.addEventListener("click", () => {
 el.shareClose.addEventListener("click", () => (el.shareModal.hidden = true));
 el.shareModal.addEventListener("click", (e) => {
   if (e.target === el.shareModal) el.shareModal.hidden = true;
+});
+
+// 调整视角重拍：暂时收起弹窗让画布可操作，截完回到弹窗（表单内容保留）
+el.shareRecapture.addEventListener("click", () => {
+  el.shareModal.hidden = true;
+  el.captureBar.hidden = false;
+});
+
+el.captureDone.addEventListener("click", () => {
+  try {
+    pendingCover = viewer.screenshot({ width: 480, type: "image/jpeg", quality: 0.85 });
+    el.shareCover.src = pendingCover;
+    el.shareCoverRow.hidden = false;
+  } catch {
+    // 截图失败保留原封面
+  }
+  el.captureBar.hidden = true;
+  el.shareModal.hidden = false;
+});
+
+el.captureCancel.addEventListener("click", () => {
+  el.captureBar.hidden = true;
+  el.shareModal.hidden = false;
 });
 
 el.shareForm.addEventListener("submit", async (e) => {

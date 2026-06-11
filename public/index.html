@@ -119,6 +119,11 @@
         <div id="param-list"></div>
       </div>
       <div id="drop-hint">松开以打开 .stl / .js 文件</div>
+      <div id="capture-bar" hidden>
+        <span>拖动调整视角（可用左上角工具栏切视图），满意后点「完成截图」</span>
+        <button id="capture-done">✓ 完成截图</button>
+        <button id="capture-cancel">取消</button>
+      </div>
     </div>
 
     <div id="code-panel" class="collapsed">
@@ -160,7 +165,10 @@
           <textarea id="share-desc" rows="3" maxlength="500" placeholder="一句话介绍：用途、尺寸、打印建议…"></textarea>
         </label>
         <div id="share-cover-row" hidden>
-          <span class="setting-note">封面（当前画布截图）</span>
+          <div class="cover-row-head">
+            <span class="setting-note">封面（当前画布截图）</span>
+            <button id="share-recapture" type="button" title="回到画布调整视角后重新截图">调整视角重拍</button>
+          </div>
           <img id="share-cover" alt="作品封面预览" />
         </div>
         <p class="setting-note">将发布当前代码面板中的建模代码，所有用户可见、可载入。</p>
