@@ -245,15 +245,25 @@ app.post("/api/generate", auth.requireAuth, async (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
 
   const send = (event) => res.write(JSON.stringify(event) + "\n");
+  const showThinking = db.settings.get("show_thinking") === "1";
 
   try {
     if (provider === "openai") {
       await generateOpenAI(
-        { messages, apiKey, model: finalModel || undefined, baseUrl: finalBaseUrl || undefined },
+        {
+          messages,
+          apiKey,
+          model: finalModel || undefined,
+          baseUrl: finalBaseUrl || undefined,
+          showThinking,
+        },
         send
       );
     } else {
-      await generate({ messages, apiKey, model: finalModel || undefined }, send);
+      await generate(
+        { messages, apiKey, model: finalModel || undefined, showThinking },
+        send
+      );
     }
   } catch (err) {
     send({ type: "error", message: describeError(err, provider, hasImages(messages)) });
@@ -347,6 +357,17 @@ app.delete("/api/admin/users/:id", auth.requireAdmin, (req, res) => {
   if (target.id === req.user.id) return res.status(400).json({ error: "不能删除自己" });
   if (target.role === "admin") return res.status(400).json({ error: "不能删除管理员账户" });
   res.json({ ok: db.users.remove(id) });
+});
+
+app.get("/api/admin/settings", auth.requireAdmin, (_req, res) => {
+  res.json({ showThinking: db.settings.get("show_thinking") === "1" });
+});
+
+app.put("/api/admin/settings", auth.requireAdmin, (req, res) => {
+  if (typeof req.body?.showThinking === "boolean") {
+    db.settings.set("show_thinking", req.body.showThinking ? "1" : "0");
+  }
+  res.json({ ok: true });
 });
 
 app.get("/api/admin/shared-config", auth.requireAdmin, (_req, res) => {

@@ -19,7 +19,10 @@ function toOpenAIContent(content) {
  * 兼容任何 OpenAI 协议服务：OpenAI 官方、DeepSeek、通义千问、Moonshot、本地 Ollama/vLLM 等。
  * 事件格式与 Anthropic 路径一致：{type:'text'} / {type:'done'} / 抛错由上层统一处理。
  */
-export async function generateOpenAI({ messages, apiKey, model, baseUrl }, onEvent) {
+export async function generateOpenAI(
+  { messages, apiKey, model, baseUrl, showThinking = false },
+  onEvent
+) {
   const client = new OpenAI({
     apiKey: apiKey || process.env.OPENAI_API_KEY,
     baseURL: baseUrl || process.env.OPENAI_BASE_URL || DEFAULT_OPENAI_BASE_URL,
@@ -38,6 +41,11 @@ export async function generateOpenAI({ messages, apiKey, model, baseUrl }, onEve
   for await (const chunk of stream) {
     const choice = chunk.choices?.[0];
     if (!choice) continue;
+    // DeepSeek-R1 / Qwen 等推理模型的思考增量字段（非标准扩展）
+    const reasoning = choice.delta?.reasoning_content;
+    if (showThinking && typeof reasoning === "string" && reasoning) {
+      onEvent({ type: "thinking", text: reasoning });
+    }
     const delta = choice.delta?.content;
     if (delta) onEvent({ type: "text", text: delta });
     if (choice.finish_reason) finishReason = choice.finish_reason;

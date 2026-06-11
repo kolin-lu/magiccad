@@ -53,6 +53,17 @@
     </section>
 
     <section class="admin-section">
+      <h2>生成选项</h2>
+      <label class="check-row settings-row">
+        <input type="checkbox" id="show-thinking" /> 显示思考过程
+        <span class="save-state" id="settings-state"></span>
+      </label>
+      <p class="setting-note">
+        勾选后，支持思考的模型（Claude 自适应思考、DeepSeek-R1 等推理模型）会把思考过程实时展示给用户（折叠在回答上方，不进入对话上下文）；不勾选则只输出最终结果。对自配 Key 和共享 Key 的用户都生效。
+      </p>
+    </section>
+
+    <section class="admin-section">
       <h2>用户管理</h2>
       <table id="user-table">
         <thead>
@@ -81,8 +92,32 @@
         const { user } = await api("/api/me");
         if (user.role !== "admin") { location.href = "/"; return; }
       } catch { location.href = "/login.html"; return; }
-      await Promise.all([loadSharedConfig(), loadUsers()]);
+      await Promise.all([loadSharedConfig(), loadUsers(), loadSettings()]);
     }
+
+    // ---------- 生成选项 ----------
+
+    async function loadSettings() {
+      const s = await api("/api/admin/settings");
+      $("#show-thinking").checked = s.showThinking;
+    }
+
+    $("#show-thinking").addEventListener("change", async (e) => {
+      const state = $("#settings-state");
+      try {
+        await api("/api/admin/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ showThinking: e.target.checked }),
+        });
+        state.textContent = "✓ 已保存";
+        state.className = "save-state ok";
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        state.textContent = err.message;
+        state.className = "save-state error";
+      }
+    });
 
     // ---------- 共享模型配置 ----------
 

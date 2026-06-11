@@ -97,7 +97,7 @@ function toAnthropicMessages(messages) {
 /**
  * 流式生成建模代码。onEvent 收到 {type:'text',text} / {type:'done',...} / {type:'error',message}
  */
-export async function generate({ messages, apiKey, model }, onEvent) {
+export async function generate({ messages, apiKey, model, showThinking = false }, onEvent) {
   const client = buildClient(apiKey);
   const stream = client.messages.stream({
     model: model || DEFAULT_MODEL,
@@ -112,6 +112,19 @@ export async function generate({ messages, apiKey, model }, onEvent) {
     ],
     messages: toAnthropicMessages(messages),
   });
+
+  // 管理员开启「显示思考过程」时，把 adaptive thinking 的思考增量也转发给前端
+  if (showThinking) {
+    stream.on("streamEvent", (event) => {
+      if (
+        event.type === "content_block_delta" &&
+        event.delta?.type === "thinking_delta" &&
+        event.delta.thinking
+      ) {
+        onEvent({ type: "thinking", text: event.delta.thinking });
+      }
+    });
+  }
 
   stream.on("text", (delta) => onEvent({ type: "text", text: delta }));
 

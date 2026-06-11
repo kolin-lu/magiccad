@@ -71,6 +71,11 @@ export function createDB(dataDir) {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       PRIMARY KEY (work_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // 旧库迁移：works 表补充封面列
@@ -360,6 +365,21 @@ export function createDB(dataDir) {
     };
   }
 
+  // ---------- 全局设置（键值对） ----------
+
+  const settings = {
+    get(key, fallback = "") {
+      return (
+        db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key)?.value ?? fallback
+      );
+    },
+    set(key, value) {
+      db.prepare(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).run(key, String(value));
+    },
+  };
+
   // ---------- 管理员初始化 ----------
 
   function seedAdmin() {
@@ -372,7 +392,7 @@ export function createDB(dataDir) {
 
   authSessions.prune();
 
-  return { users, authSessions, chats, llm, works, seedAdmin };
+  return { users, authSessions, chats, llm, works, settings, seedAdmin };
 }
 
 function safeParse(json, fallback) {

@@ -330,7 +330,14 @@ async function sendTurn(content) {
 
   state.history.push({ role: "user", content });
   addUserBubble(content);
-  const assistantBubble = addBubble("assistant", "…");
+  const assistantBubble = addBubble("assistant", "");
+  const answerDiv = document.createElement("div");
+  answerDiv.textContent = "…";
+  assistantBubble.appendChild(answerDiv);
+  // 思考过程（管理员开启时由服务端推送）展示为回答上方的折叠块，不进入对话历史
+  let thinkingBox = null;
+  let thinkingBody = null;
+  let thinkingText = "";
 
   let fullText = "";
   try {
@@ -364,9 +371,26 @@ async function sendTurn(content) {
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
-        if (event.type === "text") {
+        if (event.type === "thinking") {
+          if (!thinkingBox) {
+            thinkingBox = document.createElement("details");
+            thinkingBox.className = "bubble-thinking";
+            thinkingBox.open = true;
+            const summary = document.createElement("summary");
+            summary.textContent = "💭 思考过程";
+            thinkingBody = document.createElement("div");
+            thinkingBody.className = "thinking-body";
+            thinkingBox.append(summary, thinkingBody);
+            assistantBubble.insertBefore(thinkingBox, answerDiv);
+          }
+          thinkingText += event.text;
+          thinkingBody.textContent = thinkingText;
+          el.chat.scrollTop = el.chat.scrollHeight;
+          setStatus("AI 正在思考…");
+        } else if (event.type === "text") {
+          if (!fullText && thinkingBox) thinkingBox.open = false; // 开始回答时折叠思考
           fullText += event.text;
-          assistantBubble.textContent = stripCodeForDisplay(fullText);
+          answerDiv.textContent = stripCodeForDisplay(fullText);
           el.chat.scrollTop = el.chat.scrollHeight;
           setStatus("AI 正在生成模型代码…");
         } else if (event.type === "error") {
@@ -380,7 +404,7 @@ async function sendTurn(content) {
     if (!fullText.trim()) throw new Error("模型没有返回内容，请重试。");
 
     state.history.push({ role: "assistant", content: fullText });
-    assistantBubble.textContent = stripCodeForDisplay(fullText);
+    answerDiv.textContent = stripCodeForDisplay(fullText);
 
     const code = extractCode(fullText)?.trim();
     if (code) {
