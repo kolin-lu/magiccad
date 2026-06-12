@@ -95,6 +95,19 @@ const el = {
 
 const viewer = new Viewer(el.viewport);
 
+/**
+ * 生成会话 ID。crypto.randomUUID 仅在安全上下文（HTTPS / localhost）可用，
+ * 内网通过 http://IP:端口 访问时不存在，用 getRandomValues 兜底生成 UUID v4。
+ */
+function generateId() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 const state = {
   me: null,
   history: [], // [{role:'user'|'assistant', content}]
@@ -360,7 +373,7 @@ async function sendTurn(content) {
   setStatus("正在请求 AI…");
 
   // 提前分配会话 ID：服务端在任务开始时就把会话落库，关页也不丢
-  if (!state.sessionId) state.sessionId = crypto.randomUUID();
+  if (!state.sessionId) state.sessionId = generateId();
   state.history.push({ role: "user", content });
   addUserBubble(content);
   const assistantBubble = addBubble("assistant", "");
@@ -1036,7 +1049,7 @@ function deriveTitle() {
 
 async function saveSession() {
   if (state.history.length === 0) return;
-  if (!state.sessionId) state.sessionId = crypto.randomUUID();
+  if (!state.sessionId) state.sessionId = generateId();
   try {
     await fetch(`/api/sessions/${state.sessionId}`, {
       method: "PUT",
