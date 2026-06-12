@@ -160,7 +160,7 @@ el.changePassword.addEventListener("click", async () => {
 
 let llmConfig = null;
 
-el.providerSelect.value = localStorage.getItem("magiccad.provider") || "anthropic";
+el.providerSelect.value = localStorage.getItem("magiccad.provider") || "openai";
 el.keySource.value = localStorage.getItem("magiccad.keySource") || "own";
 
 function applySettingsUI() {
