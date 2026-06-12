@@ -5,7 +5,7 @@
 **An AI modeling platform that turns natural language into 2D drawings and 3D models**
 
 [![Node](https://img.shields.io/badge/Node.js-%E2%89%A5%2022.5-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/Version-0.2_Beta-d8b04a)]()
 
 [简体中文](README.md) | **English**
@@ -161,6 +161,6 @@ data/
 
 <div align="center">
 
-MIT License
+Apache License 2.0 · Copyright © 2026 luchao
 
 </div>

@@ -9,7 +9,7 @@
     "dev": "npm run build && node server/index.js",
     "start": "npm run build && node server/index.js"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
     "@jscad/dxf-serializer": "^2.1.21",
