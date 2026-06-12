@@ -95,6 +95,7 @@
       <button id="open-file" title="打开 STL 模型、JSCAD 代码或图片（框选后 AI 识别建模），也可直接拖入画布">打开文件</button>
       <input id="file-input" type="file" accept=".stl,.js,.png,.jpg,.jpeg,.webp" hidden />
       <button id="screenshot" disabled title="把当前画面保存为 PNG 图片">截图</button>
+      <button id="annotate-btn" disabled title="截取当前画布，圈注出要调整的部位发给 AI">圈注反馈</button>
       <button id="share-work" disabled title="把当前模型发布到作品市场">分享到市场</button>
       <button id="export-stl" disabled>导出 STL（3D 打印）</button>
       <button id="export-svg" disabled>导出 SVG</button>
@@ -178,6 +179,7 @@
         </div>
         <div class="crop-controls">
           <button id="crop-all" type="button">全选</button>
+          <button id="crop-annotate" type="button" title="对选中区域画标注后发给 AI 调整">圈注反馈</button>
           <span class="setting-note">拖动画出选框，拖动选框可移动，拖动四角可调整大小</span>
         </div>
         <label class="crop-hint-label">补充说明（强烈建议填写）
@@ -187,6 +189,38 @@
         <p class="setting-note">AI 只能从图片推断形状比例，绝对尺寸请在说明中给出，生成后也可用参数面板微调。</p>
         <p id="crop-error" class="auth-error" hidden></p>
         <button id="crop-submit">识别并建模</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="annotate-modal" class="modal-mask" hidden>
+    <div class="modal-card annotate-card">
+      <header>
+        <h2>圈注反馈 — 在图上标出要调整的地方</h2>
+        <button id="annotate-close" class="modal-close" title="关闭">×</button>
+      </header>
+      <div class="annotate-body">
+        <div class="annotate-toolbar">
+          <button class="anno-tool active" data-tool="rect" title="拖出方框圈选部位">▢ 框选</button>
+          <button class="anno-tool" data-tool="arrow" title="拖出箭头指向部位">↗ 箭头</button>
+          <button class="anno-tool" data-tool="pen" title="自由圈画">✎ 画笔</button>
+          <span class="anno-sep"></span>
+          <button class="anno-color active" data-color="#ff4d4f" style="--c:#ff4d4f" title="红色"></button>
+          <button class="anno-color" data-color="#ffd23f" style="--c:#ffd23f" title="黄色"></button>
+          <button class="anno-color" data-color="#33b1ff" style="--c:#33b1ff" title="蓝色"></button>
+          <span class="anno-sep"></span>
+          <button id="annotate-undo">撤销</button>
+          <button id="annotate-clear">清空</button>
+        </div>
+        <div id="annotate-stage">
+          <canvas id="annotate-canvas"></canvas>
+        </div>
+        <label class="crop-hint-label">说明（建议配合标注简述要改什么）
+          <textarea id="annotate-hint" rows="2" maxlength="300"
+            placeholder="例如：红圈处壁太薄，改成 3mm；箭头指的孔往外移 5mm"></textarea>
+        </label>
+        <p id="annotate-error" class="auth-error" hidden></p>
+        <button id="annotate-submit">发送给 AI 调整</button>
       </div>
     </div>
   </div>

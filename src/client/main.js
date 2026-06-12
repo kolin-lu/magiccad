@@ -78,9 +78,19 @@ const el = {
   cropCanvas: $("#crop-canvas"),
   cropBox: $("#crop-box"),
   cropAll: $("#crop-all"),
+  cropAnnotate: $("#crop-annotate"),
   cropHint: $("#crop-hint"),
   cropError: $("#crop-error"),
   cropSubmit: $("#crop-submit"),
+  annotateBtn: $("#annotate-btn"),
+  annotateModal: $("#annotate-modal"),
+  annotateClose: $("#annotate-close"),
+  annotateCanvas: $("#annotate-canvas"),
+  annotateHint: $("#annotate-hint"),
+  annotateError: $("#annotate-error"),
+  annotateSubmit: $("#annotate-submit"),
+  annotateUndo: $("#annotate-undo"),
+  annotateClear: $("#annotate-clear"),
 };
 
 const viewer = new Viewer(el.viewport);
@@ -608,6 +618,7 @@ function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false, s
     el.exportDxf.disabled = !kinds.has2d;
     el.shareWork.disabled = false;
     el.screenshot.disabled = false;
+    el.annotateBtn.disabled = false;
 
     applyAutoView(kinds);
     updateGridInfo(info.gridSpacing);
@@ -711,7 +722,14 @@ document.addEventListener("keydown", (e) => {
     el.captureCancel.click();
     return;
   }
-  if (!el.historyModal.hidden || !el.shareModal.hidden || !el.cropModal.hidden) return;
+  if (
+    !el.historyModal.hidden ||
+    !el.shareModal.hidden ||
+    !el.cropModal.hidden ||
+    !el.annotateModal.hidden
+  ) {
+    return;
+  }
   const views = { 1: "iso", 2: "top", 3: "front", 4: "right" };
   const key = e.key.toLowerCase();
   if (views[key]) viewer.setStandardView(views[key]);
@@ -1144,6 +1162,7 @@ async function openLocalFile(file) {
       el.exportSvg.disabled = true;
       el.exportDxf.disabled = true;
       el.screenshot.disabled = false;
+      el.annotateBtn.disabled = false;
       updateGridInfo(info.gridSpacing);
       const fmt = (n) => (Math.round(n * 10) / 10).toString();
       setStatus(
@@ -1293,22 +1312,16 @@ el.cropModal.addEventListener("click", (e) => {
   if (e.target === el.cropModal) el.cropModal.hidden = true;
 });
 
-el.cropSubmit.addEventListener("click", () => {
-  const showError = (msg) => {
-    el.cropError.textContent = msg;
-    el.cropError.hidden = false;
-  };
-  if (state.busy) return showError("正在生成中，请稍候再试");
+/** 把当前选区裁剪为 data URL（最长边 maxDim），无有效选区返回 null */
+function cropSelectionToDataUrl(maxDim) {
   const s = crop.sel;
-  if (!s || s.w < 8 || s.h < 8) return showError("请先框选一个有效区域");
-
-  // 选区映射回原图坐标，裁剪并压缩到最长边 1024px 的 JPEG
+  if (!crop.img || !s || s.w < 8 || s.h < 8) return null;
   const inv = 1 / crop.scale;
   const sx = s.x * inv;
   const sy = s.y * inv;
   const sw = s.w * inv;
   const sh = s.h * inv;
-  const outScale = Math.min(1, CROP_OUT_MAX / Math.max(sw, sh));
+  const outScale = Math.min(1, maxDim / Math.max(sw, sh));
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(sw * outScale));
   canvas.height = Math.max(1, Math.round(sh * outScale));
@@ -1316,7 +1329,17 @@ el.cropSubmit.addEventListener("click", () => {
   ctx.fillStyle = "#fff"; // 透明 PNG 转 JPEG 时垫白底
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(crop.img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+el.cropSubmit.addEventListener("click", () => {
+  const showError = (msg) => {
+    el.cropError.textContent = msg;
+    el.cropError.hidden = false;
+  };
+  if (state.busy) return showError("正在生成中，请稍候再试");
+  const dataUrl = cropSelectionToDataUrl(CROP_OUT_MAX);
+  if (!dataUrl) return showError("请先框选一个有效区域");
 
   const hint = el.cropHint.value.trim();
   const text = hint
@@ -1324,6 +1347,220 @@ el.cropSubmit.addEventListener("click", () => {
     : "请识别这张图片中的物体，生成对应的参数化模型（尺寸未知时自行估一个合理值并说明）。";
 
   el.cropModal.hidden = true;
+  sendTurn([
+    { type: "image", mediaType: "image/jpeg", data: dataUrl.split(",")[1] },
+    { type: "text", text },
+  ]);
+});
+
+// 框选弹窗内转入圈注：对选中区域画标注
+el.cropAnnotate.addEventListener("click", () => {
+  const dataUrl = cropSelectionToDataUrl(1600);
+  if (!dataUrl) {
+    el.cropError.textContent = "请先框选一个有效区域";
+    el.cropError.hidden = false;
+    return;
+  }
+  el.cropModal.hidden = true;
+  openAnnotateModal(dataUrl);
+});
+
+// ---------- 圈注反馈：在截图上标注要调整的部位 ----------
+
+const ANNOTATE_STAGE_W = 680;
+const ANNOTATE_STAGE_H = 400;
+const ANNOTATE_OUT_MAX = 1024;
+
+const annotate = {
+  img: null,
+  shapes: [], // {tool:'rect'|'arrow', x0,y0,x1,y1, color} | {tool:'pen', points:[[x,y]...], color}
+  current: null,
+  tool: "rect",
+  color: "#ff4d4f",
+  drawing: false,
+};
+
+function openAnnotateModal(src) {
+  const img = new Image();
+  img.onload = () => {
+    annotate.img = img;
+    annotate.shapes = [];
+    annotate.current = null;
+    const scale = Math.min(
+      ANNOTATE_STAGE_W / img.naturalWidth,
+      ANNOTATE_STAGE_H / img.naturalHeight,
+      1
+    );
+    el.annotateCanvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    el.annotateCanvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    redrawAnnotations();
+    el.annotateHint.value = "";
+    el.annotateError.hidden = true;
+    el.annotateModal.hidden = false;
+  };
+  img.onerror = () => setStatus("截图加载失败", "error");
+  img.src = src;
+}
+
+function redrawAnnotations() {
+  const ctx = el.annotateCanvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, el.annotateCanvas.width, el.annotateCanvas.height);
+  ctx.drawImage(annotate.img, 0, 0, el.annotateCanvas.width, el.annotateCanvas.height);
+  for (const s of annotate.shapes) drawAnnotation(ctx, s, 1);
+  if (annotate.current) drawAnnotation(ctx, annotate.current, 1);
+}
+
+/** k 为坐标/线宽缩放系数（导出合成时按输出尺寸放大） */
+function drawAnnotation(ctx, s, k) {
+  ctx.strokeStyle = s.color;
+  ctx.fillStyle = s.color;
+  ctx.lineWidth = 3 * k;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  if (s.tool === "rect") {
+    ctx.strokeRect(
+      Math.min(s.x0, s.x1) * k,
+      Math.min(s.y0, s.y1) * k,
+      Math.abs(s.x1 - s.x0) * k,
+      Math.abs(s.y1 - s.y0) * k
+    );
+  } else if (s.tool === "pen") {
+    ctx.beginPath();
+    s.points.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+    ctx.stroke();
+  } else if (s.tool === "arrow") {
+    const x0 = s.x0 * k, y0 = s.y0 * k, x1 = s.x1 * k, y1 = s.y1 * k;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    // 箭头头部：终点处两条短边
+    const angle = Math.atan2(y1 - y0, x1 - x0);
+    const head = 12 * k;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x1 - head * Math.cos(angle - 0.45), y1 - head * Math.sin(angle - 0.45));
+    ctx.lineTo(x1 - head * Math.cos(angle + 0.45), y1 - head * Math.sin(angle + 0.45));
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function annotatePointer(e) {
+  const rect = el.annotateCanvas.getBoundingClientRect();
+  const clamp = (v, max) => Math.min(Math.max(v, 0), max);
+  return {
+    x: clamp(e.clientX - rect.left, el.annotateCanvas.width),
+    y: clamp(e.clientY - rect.top, el.annotateCanvas.height),
+  };
+}
+
+el.annotateCanvas.addEventListener("pointerdown", (e) => {
+  if (!annotate.img) return;
+  e.preventDefault();
+  const p = annotatePointer(e);
+  annotate.drawing = true;
+  annotate.current =
+    annotate.tool === "pen"
+      ? { tool: "pen", points: [[p.x, p.y]], color: annotate.color }
+      : { tool: annotate.tool, x0: p.x, y0: p.y, x1: p.x, y1: p.y, color: annotate.color };
+  el.annotateCanvas.setPointerCapture(e.pointerId);
+});
+
+el.annotateCanvas.addEventListener("pointermove", (e) => {
+  if (!annotate.drawing || !annotate.current) return;
+  const p = annotatePointer(e);
+  if (annotate.current.tool === "pen") annotate.current.points.push([p.x, p.y]);
+  else {
+    annotate.current.x1 = p.x;
+    annotate.current.y1 = p.y;
+  }
+  redrawAnnotations();
+});
+
+function finishAnnotation() {
+  if (!annotate.drawing) return;
+  annotate.drawing = false;
+  const c = annotate.current;
+  annotate.current = null;
+  if (!c) return;
+  // 过滤误触的极小标注
+  const big =
+    c.tool === "pen"
+      ? c.points.length > 3
+      : Math.abs(c.x1 - c.x0) + Math.abs(c.y1 - c.y0) > 6;
+  if (big) annotate.shapes.push(c);
+  redrawAnnotations();
+}
+
+el.annotateCanvas.addEventListener("pointerup", finishAnnotation);
+el.annotateCanvas.addEventListener("pointercancel", finishAnnotation);
+
+el.annotateUndo.addEventListener("click", () => {
+  annotate.shapes.pop();
+  redrawAnnotations();
+});
+
+el.annotateClear.addEventListener("click", () => {
+  annotate.shapes = [];
+  redrawAnnotations();
+});
+
+for (const btn of document.querySelectorAll(".anno-tool")) {
+  btn.addEventListener("click", () => {
+    annotate.tool = btn.dataset.tool;
+    document.querySelectorAll(".anno-tool").forEach((b) => b.classList.toggle("active", b === btn));
+  });
+}
+
+for (const btn of document.querySelectorAll(".anno-color")) {
+  btn.addEventListener("click", () => {
+    annotate.color = btn.dataset.color;
+    document.querySelectorAll(".anno-color").forEach((b) => b.classList.toggle("active", b === btn));
+  });
+}
+
+el.annotateClose.addEventListener("click", () => (el.annotateModal.hidden = true));
+el.annotateModal.addEventListener("click", (e) => {
+  if (e.target === el.annotateModal) el.annotateModal.hidden = true;
+});
+
+el.annotateBtn.addEventListener("click", () => {
+  openAnnotateModal(viewer.screenshot());
+});
+
+el.annotateSubmit.addEventListener("click", () => {
+  const showError = (msg) => {
+    el.annotateError.textContent = msg;
+    el.annotateError.hidden = false;
+  };
+  if (state.busy) return showError("正在生成中，请稍候再试");
+  const hint = el.annotateHint.value.trim();
+  if (!annotate.shapes.length && !hint) {
+    return showError("请至少画一个标注，或填写文字说明");
+  }
+
+  // 按原图尺寸合成标注（最长边 1024px）
+  const w0 = annotate.img.naturalWidth;
+  const h0 = annotate.img.naturalHeight;
+  const outScale = Math.min(1, ANNOTATE_OUT_MAX / Math.max(w0, h0));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w0 * outScale));
+  canvas.height = Math.max(1, Math.round(h0 * outScale));
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(annotate.img, 0, 0, canvas.width, canvas.height);
+  const k = canvas.width / el.annotateCanvas.width; // 显示坐标 → 输出坐标
+  for (const s of annotate.shapes) drawAnnotation(ctx, s, k);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+
+  const text = hint
+    ? `这是当前模型的标注截图，标注指出需要调整的部位。要求：${hint}`
+    : "这是当前模型的标注截图，请根据标注（框/箭头/圈画）指出的部位调整模型，输出完整新代码。";
+
+  el.annotateModal.hidden = true;
   sendTurn([
     { type: "image", mediaType: "image/jpeg", data: dataUrl.split(",")[1] },
     { type: "text", text },
