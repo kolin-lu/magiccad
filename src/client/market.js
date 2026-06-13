@@ -1,6 +1,11 @@
 import { Viewer } from "./viewer.js";
 import { runModelCode } from "./jscad-runner.js";
 
+// i18n：t() 由 public/i18n.js 提供（中文为源语言），异常时退化为原样输出
+const t =
+  window.t ||
+  ((s, ...args) => args.reduce((out, a, i) => out.replaceAll(`{${i}}`, a), s));
+
 const $ = (sel) => document.querySelector(sel);
 
 const el = {
@@ -34,18 +39,18 @@ async function init() {
 }
 
 async function refreshList() {
-  el.grid.innerHTML = '<div class="empty">加载中…</div>';
+  el.grid.innerHTML = `<div class="empty">${t("加载中…")}</div>`;
   try {
     const works = await (await fetch("/api/works")).json();
     if (!works.length) {
       el.grid.innerHTML =
-        '<div class="empty">还没有作品。在工作台生成模型后，点「分享到市场」发布第一个作品吧！</div>';
+        `<div class="empty">${t("还没有作品。在工作台生成模型后，点「分享到市场」发布第一个作品吧！")}</div>`;
       return;
     }
     el.grid.innerHTML = "";
     for (const w of works) el.grid.appendChild(renderCard(w));
   } catch {
-    el.grid.innerHTML = '<div class="empty">加载失败，请刷新重试</div>';
+    el.grid.innerHTML = `<div class="empty">${t("加载失败，请刷新重试")}</div>`;
   }
 }
 
@@ -73,11 +78,11 @@ function renderCard(w) {
 
   const desc = document.createElement("div");
   desc.className = "desc";
-  desc.textContent = w.description || "（没有简介）";
+  desc.textContent = w.description || t("（没有简介）");
 
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = `${w.author}${w.mine ? "（我）" : ""} · ${formatTime(w.createdAt)}`;
+  meta.textContent = `${w.author}${w.mine ? t("（我）") : ""} · ${formatTime(w.createdAt)}`;
 
   const footer = document.createElement("div");
   footer.className = "card-footer";
@@ -98,7 +103,7 @@ function renderCard(w) {
 
   const viewBtn = document.createElement("button");
   viewBtn.className = "view-btn";
-  viewBtn.textContent = "查看";
+  viewBtn.textContent = t("查看");
   viewBtn.addEventListener("click", () => openWork(w.id));
 
   footer.append(likeBtn, viewBtn);
@@ -123,15 +128,15 @@ async function toggleLike(id) {
 async function openWork(id) {
   try {
     const resp = await fetch(`/api/works/${id}`);
-    if (!resp.ok) throw new Error("作品不存在");
+    if (!resp.ok) throw new Error(t("作品不存在"));
     const w = await resp.json();
     currentWork = w;
 
     el.title.textContent = w.title;
-    el.meta.textContent = `作者：${w.author} · ${formatTime(w.createdAt)}`;
-    el.desc.textContent = w.description || "（没有简介）";
+    el.meta.textContent = t("作者：{0} · {1}", w.author, formatTime(w.createdAt));
+    el.desc.textContent = w.description || t("（没有简介）");
     el.code.textContent = w.code;
-    el.like.textContent = `${w.liked ? "♥ 已赞" : "♡ 点赞"}（${w.likes}）`;
+    el.like.textContent = `${w.liked ? t("♥ 已赞") : t("♡ 点赞")}（${w.likes}）`;
     el.like.classList.toggle("liked", w.liked);
     el.del.hidden = !(w.mine || me.role === "admin");
     el.modal.hidden = false;
@@ -142,7 +147,7 @@ async function openWork(id) {
       viewer.setGeometries(geometries);
     } catch (err) {
       viewer.setGeometries([]);
-      el.desc.textContent += `\n（预览失败：${err.message}）`;
+      el.desc.textContent += t("\n（预览失败：{0}）", err.message);
     }
   } catch (err) {
     alert(err.message);
@@ -160,7 +165,7 @@ el.like.addEventListener("click", async () => {
   if (r) {
     currentWork.liked = r.liked;
     currentWork.likes = r.likes;
-    el.like.textContent = `${r.liked ? "♥ 已赞" : "♡ 点赞"}（${r.likes}）`;
+    el.like.textContent = `${r.liked ? t("♥ 已赞") : t("♡ 点赞")}（${r.likes}）`;
     el.like.classList.toggle("liked", r.liked);
     refreshList();
   }
@@ -178,14 +183,14 @@ el.load.addEventListener("click", () => {
 
 el.del.addEventListener("click", async () => {
   if (!currentWork) return;
-  if (!confirm(`删除作品「${currentWork.title}」？`)) return;
+  if (!confirm(t("删除作品「{0}」？", currentWork.title))) return;
   const resp = await fetch(`/api/works/${currentWork.id}`, { method: "DELETE" });
   if (resp.ok) {
     el.modal.hidden = true;
     refreshList();
   } else {
     const body = await resp.json().catch(() => ({}));
-    alert(body.error || "删除失败");
+    alert(body.error || t("删除失败"));
   }
 });
 

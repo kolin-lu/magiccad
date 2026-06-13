@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>管理后台 — MagicCAD</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="i18n.js"></script>
   <script src="scrollbar.js" defer></script>
 </head>
 <body class="market-page">
   <header id="market-topbar">
     <h1 class="auth-brand">Magic<span>CAD</span> · 管理后台 <em class="ver-tag">v0.2 测试版</em></h1>
     <div class="spacer"></div>
+    <button id="lang-toggle" class="btn-link lang-btn"></button>
     <a href="/market.html" class="btn-link">作品市场</a>
     <a href="/" class="btn-link">← 返回工作台</a>
   </header>
@@ -100,7 +102,7 @@
     async function api(url, options) {
       const resp = await fetch(url, options);
       const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(body.error || `请求失败（${resp.status}）`);
+      if (!resp.ok) throw new Error(body.error || t("请求失败（{0}）", resp.status));
       return body;
     }
 
@@ -130,7 +132,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ genEffort: radio.value }),
           });
-          state.textContent = "✓ 已保存";
+          state.textContent = t("✓ 已保存");
           state.className = "save-state ok";
         } catch (err) {
           state.textContent = err.message;
@@ -147,7 +149,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ showThinking: e.target.checked }),
         });
-        state.textContent = "✓ 已保存";
+        state.textContent = t("✓ 已保存");
         state.className = "save-state ok";
       } catch (err) {
         e.target.checked = !e.target.checked;
@@ -165,7 +167,7 @@
         form.enabled.checked = c.enabled;
         form.model.value = c.model;
         if (form.baseUrl) form.baseUrl.value = c.baseUrl;
-        form.apiKey.placeholder = c.hasKey ? "已保存（留空表示不修改）" : form.apiKey.placeholder;
+        form.apiKey.placeholder = c.hasKey ? t("已保存（留空表示不修改）") : form.apiKey.placeholder;
       }
     }
 
@@ -187,7 +189,7 @@
             }),
           });
           form.apiKey.value = "";
-          state.textContent = "✓ 已保存";
+          state.textContent = t("✓ 已保存");
           state.className = "save-state ok";
           loadSharedConfig();
         } catch (err) {
@@ -206,7 +208,7 @@
       for (const u of users) {
         const tr = document.createElement("tr");
 
-        const tds = [u.username, u.role === "admin" ? "管理员" : "用户",
+        const tds = [u.username, u.role === "admin" ? t("管理员") : t("用户"),
                      String(u.workCount), formatTime(u.createdAt)].map((text) => {
           const td = document.createElement("td");
           td.textContent = text;
@@ -236,9 +238,9 @@
         if (u.role !== "admin") {
           const del = document.createElement("button");
           del.className = "danger small";
-          del.textContent = "删除";
+          del.textContent = t("删除");
           del.addEventListener("click", async () => {
-            if (!confirm(`删除用户「${u.username}」？其会话历史与作品将一并删除。`)) return;
+            if (!confirm(t("删除用户「{0}」？其会话历史与作品将一并删除。", u.username))) return;
             try {
               await api(`/api/admin/users/${u.id}`, { method: "DELETE" });
               tr.remove();

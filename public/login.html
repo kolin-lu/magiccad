@@ -5,10 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>登录 — MagicCAD</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="i18n.js"></script>
   <script src="scrollbar.js" defer></script>
 </head>
 <body class="auth-page">
   <div id="auth-card">
+    <button id="lang-toggle" class="auth-lang"></button>
     <h1 class="auth-brand">Magic<span>CAD</span> <em class="ver-tag">v0.2 测试版</em></h1>
     <p class="auth-sub">自然语言生成 2D/3D 模型</p>
 
@@ -47,7 +49,7 @@
       $("#tab-register").classList.toggle("active", m === "register");
       $("#confirm-row").hidden = m === "login";
       $("#password2").required = m === "register";
-      $("#auth-submit").textContent = m === "login" ? "登录" : "注册";
+      $("#auth-submit").textContent = t(m === "login" ? "登录" : "注册");
       $("#auth-error").hidden = true;
     }
     $("#tab-login").addEventListener("click", () => setMode("login"));
@@ -58,7 +60,7 @@
       const username = $("#username").value.trim();
       const password = $("#password").value;
       if (mode === "register" && password !== $("#password2").value) {
-        return showError("两次输入的密码不一致");
+        return showError(t("两次输入的密码不一致"));
       }
       $("#auth-submit").disabled = true;
       try {
@@ -68,7 +70,7 @@
           body: JSON.stringify({ username, password }),
         });
         const body = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(body.error || `请求失败（${resp.status}）`);
+        if (!resp.ok) throw new Error(body.error || t("请求失败（{0}）", resp.status));
         location.href = "/";
       } catch (err) {
         showError(err.message);

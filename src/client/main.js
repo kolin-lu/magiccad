@@ -3,6 +3,11 @@ import { runModelCode } from "./jscad-runner.js";
 import { exportSTL, exportSVG, exportDXF } from "./export.js";
 import { marked } from "marked";
 
+// i18n：t() 由 public/i18n.js 提供（中文为源语言），异常时退化为原样输出
+const t =
+  window.t ||
+  ((s, ...args) => args.reduce((out, a, i) => out.replaceAll(`{${i}}`, a), s));
+
 const $ = (sel) => document.querySelector(sel);
 
 const el = {
@@ -143,9 +148,9 @@ el.logout.addEventListener("click", async () => {
 });
 
 el.changePassword.addEventListener("click", async () => {
-  const oldPassword = prompt("请输入当前密码：");
+  const oldPassword = prompt(t("请输入当前密码："));
   if (!oldPassword) return;
-  const newPassword = prompt("请输入新密码（至少 6 位）：");
+  const newPassword = prompt(t("请输入新密码（至少 6 位）："));
   if (!newPassword) return;
   const resp = await fetch("/api/auth/password", {
     method: "POST",
@@ -153,7 +158,7 @@ el.changePassword.addEventListener("click", async () => {
     body: JSON.stringify({ oldPassword, newPassword }),
   });
   const body = await resp.json().catch(() => ({}));
-  alert(resp.ok ? "密码已修改" : body.error || "修改失败");
+  alert(resp.ok ? t("密码已修改") : body.error || t("修改失败"));
 });
 
 // ---------- 设置（保存到账户，Key 不回传浏览器） ----------
@@ -176,18 +181,18 @@ function applySettingsUI() {
   if (shared) {
     const cfg = llmConfig.shared;
     if (!cfg.allowed) {
-      el.sharedHint.textContent = "⚠ 你的共享模型使用权已被管理员关闭，请使用自己的 API Key 或联系管理员。";
+      el.sharedHint.textContent = t("⚠ 你的共享模型使用权已被管理员关闭，请使用自己的 API Key 或联系管理员。");
     } else if (!cfg[provider]) {
-      el.sharedHint.textContent = "⚠ 管理员尚未启用该服务商的共享配置，请换一个服务商。";
+      el.sharedHint.textContent = t("⚠ 管理员尚未启用该服务商的共享配置，请换一个服务商。");
     } else {
-      el.sharedHint.textContent = "✓ 已授权使用平台共享模型，模型与 Key 由管理员统一配置。";
+      el.sharedHint.textContent = t("✓ 已授权使用平台共享模型，模型与 Key 由管理员统一配置。");
     }
   } else {
     el.apiKey.placeholder = llmConfig.anthropic.hasKey
-      ? "已保存（输入新 Key 可覆盖）"
+      ? t("已保存（输入新 Key 可覆盖）")
       : "sk-ant-...";
     el.openaiKey.placeholder = llmConfig.openai.hasKey
-      ? "已保存（输入新 Key 可覆盖）"
+      ? t("已保存（输入新 Key 可覆盖）")
       : "sk-...";
   }
 }
@@ -221,7 +226,7 @@ async function saveProviderConfig(provider, extra = {}) {
       body: JSON.stringify({ provider, ...base, ...extra }),
     });
   } catch {
-    setStatus("设置保存失败", "warn");
+    setStatus(t("设置保存失败"), "warn");
   }
 }
 
@@ -234,7 +239,7 @@ function bindKeyInput(input, provider) {
     input.value = "";
     if (llmConfig) llmConfig[provider].hasKey = true;
     applySettingsUI();
-    setStatus("API Key 已保存到账户", "ok");
+    setStatus(t("API Key 已保存到账户"), "ok");
   });
 }
 
@@ -290,7 +295,7 @@ function addUserBubble(content) {
       const img = document.createElement("img");
       img.className = "bubble-image";
       img.src = `data:${b.mediaType};base64,${b.data}`;
-      img.alt = "上传的图片";
+      img.alt = t("上传的图片");
       div.appendChild(img);
     } else if (b.type === "text") {
       const t = document.createElement("div");
@@ -320,7 +325,7 @@ function addErrorCard(message, fixPrompt) {
   card.appendChild(p);
   if (fixPrompt) {
     const btn = document.createElement("button");
-    btn.textContent = "让 AI 修复";
+    btn.textContent = t("让 AI 修复");
     btn.className = "fix-btn";
     btn.addEventListener("click", () => {
       btn.disabled = true;
@@ -342,7 +347,7 @@ function setBusy(busy) {
   el.input.disabled = busy;
   // 生成中按钮变为「中止」，点击可终止服务端任务
   el.send.disabled = false;
-  el.send.textContent = busy ? "■ 中止" : "发送";
+  el.send.textContent = busy ? t("■ 中止") : t("发送");
   el.send.classList.toggle("stop", busy);
 }
 
@@ -370,7 +375,7 @@ async function sendMessage(text) {
 async function sendTurn(content) {
   if (state.busy) return;
   setBusy(true);
-  setStatus("正在请求 AI…");
+  setStatus(t("正在请求 AI…"));
 
   // 提前分配会话 ID：服务端在任务开始时就把会话落库，关页也不丢
   if (!state.sessionId) state.sessionId = generateId();
@@ -393,14 +398,14 @@ async function sendTurn(content) {
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       if (resp.status === 401 && body.error === "请先登录") return gotoLogin();
-      throw new Error(body.error || `请求失败（${resp.status}）`);
+      throw new Error(body.error || t("请求失败（{0}）", resp.status));
     }
 
     state.activeJobId = body.jobId;
     const { text: visibleText, aborted } = await consumeJobStream(body.jobId, assistantBubble);
     state.history.push({ role: "assistant", content: visibleText });
     applyAssistantResult(visibleText);
-    if (aborted) setStatus("已中止，保留了已生成的部分", "warn");
+    if (aborted) setStatus(t("已中止，保留了已生成的部分"), "warn");
   } catch (err) {
     assistantBubble.remove();
     // 失败的轮次从历史中移除，避免污染上下文
@@ -408,7 +413,7 @@ async function sendTurn(content) {
       state.history.pop();
     }
     addErrorCard(err.message);
-    setStatus("生成失败", "error");
+    setStatus(t("生成失败"), "error");
   } finally {
     state.activeJobId = null;
     setBusy(false);
@@ -444,7 +449,7 @@ async function consumeJobStream(jobId, assistantBubble) {
         entry.root.innerHTML = renderMarkdown(stripCodeForDisplay(seg.text));
       } else {
         entry.body.textContent = seg.text.trim();
-        entry.summary.textContent = seg.closed ? "💭 思考过程" : "💭 思考中…";
+        entry.summary.textContent = seg.closed ? t("💭 思考过程") : t("💭 思考中…");
       }
     });
     el.chat.scrollTop = el.chat.scrollHeight;
@@ -453,7 +458,7 @@ async function consumeJobStream(jobId, assistantBubble) {
   const resp = await fetch(`/api/jobs/${jobId}/stream`);
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    throw new Error(body.error || `连接生成任务失败（${resp.status}）`);
+    throw new Error(body.error || t("连接生成任务失败（{0}）", resp.status));
   }
 
   // 解析 NDJSON 流（先回放任务已产生的事件，再续实时）
@@ -481,16 +486,16 @@ async function consumeJobStream(jobId, assistantBubble) {
         eventThinking.text += event.text;
         eventThinking.body.textContent = eventThinking.text;
         el.chat.scrollTop = el.chat.scrollHeight;
-        setStatus("AI 正在思考…");
+        setStatus(t("AI 正在思考…"));
       } else if (event.type === "text") {
         rawText += event.text;
-        if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
+        if (eventThinking) eventThinking.summary.textContent = t("💭 思考过程");
         renderAssistant();
-        setStatus("AI 正在生成模型代码…");
+        setStatus(t("AI 正在生成模型代码…"));
       } else if (event.type === "error") {
         streamError = event.message;
       } else if (event.type === "done" && event.stopReason === "refusal") {
-        streamError = "该请求被模型安全策略拒绝，请换一种描述方式。";
+        streamError = t("该请求被模型安全策略拒绝，请换一种描述方式。");
       } else if (event.type === "done" && event.stopReason === "aborted") {
         aborted = true;
       }
@@ -500,14 +505,14 @@ async function consumeJobStream(jobId, assistantBubble) {
   // 思考内容（标签内或事件流）不写入历史、不回传模型
   const visibleText = stripThink(rawText);
   if (!visibleText.trim()) {
-    throw new Error(aborted ? "已中止生成" : "模型没有返回内容，请重试。");
+    throw new Error(aborted ? t("已中止生成") : t("模型没有返回内容，请重试。"));
   }
 
   renderAssistant();
   for (const entry of segEls) {
-    if (entry?.type === "think") entry.summary.textContent = "💭 思考过程";
+    if (entry?.type === "think") entry.summary.textContent = t("💭 思考过程");
   }
-  if (eventThinking) eventThinking.summary.textContent = "💭 思考过程";
+  if (eventThinking) eventThinking.summary.textContent = t("💭 思考过程");
   return { text: visibleText, aborted };
 }
 
@@ -520,7 +525,7 @@ function applyAssistantResult(visibleText) {
   }
   saveSession();
   if (!code) {
-    setStatus("回复中没有建模代码", "warn");
+    setStatus(t("回复中没有建模代码"), "warn");
     return;
   }
   buildFromCode(code, { fromAI: true });
@@ -538,18 +543,18 @@ async function resumeActiveJob() {
 
   await loadSession(job.sessionId); // 会话里已含本轮用户消息
   setBusy(true);
-  setStatus("正在续接后台生成…");
+  setStatus(t("正在续接后台生成…"));
   state.activeJobId = job.jobId;
   const assistantBubble = addBubble("assistant", "");
   try {
     const { text: visibleText, aborted } = await consumeJobStream(job.jobId, assistantBubble);
     state.history.push({ role: "assistant", content: visibleText });
     applyAssistantResult(visibleText);
-    if (aborted) setStatus("已中止，保留了已生成的部分", "warn");
+    if (aborted) setStatus(t("已中止，保留了已生成的部分"), "warn");
   } catch (err) {
     assistantBubble.remove();
     addErrorCard(err.message);
-    setStatus("生成失败", "error");
+    setStatus(t("生成失败"), "error");
   } finally {
     state.activeJobId = null;
     setBusy(false);
@@ -558,7 +563,7 @@ async function resumeActiveJob() {
 
 /** 聊天气泡里隐藏大段代码，只显示说明文字 */
 function stripCodeForDisplay(text) {
-  return text.replace(/```(?:javascript|js)?\s*\n[\s\S]*?(```|$)/g, "〔已生成建模代码 →〕").trim();
+  return text.replace(/```(?:javascript|js)?\s*\n[\s\S]*?(```|$)/g, t("〔已生成建模代码 →〕")).trim();
 }
 
 /**
@@ -612,7 +617,7 @@ function createAssistantSegment(type) {
   const root = document.createElement("details");
   root.className = "bubble-thinking";
   const summary = document.createElement("summary");
-  summary.textContent = "💭 思考中…";
+  summary.textContent = t("💭 思考中…");
   const body = document.createElement("div");
   body.className = "thinking-body";
   root.append(summary, body);
@@ -640,29 +645,29 @@ function buildFromCode(code, { fromAI = false, snapshot = true, quiet = false, s
     if (!quiet) renderParamPanel(code);
 
     setStatus(
-      `已生成 ${geometries.length} 个几何体（${[
-        kinds.has3d ? "3D" : null,
-        kinds.has2d ? "2D" : null,
-      ]
-        .filter(Boolean)
-        .join(" + ")}）· ${formatDims(info.size, kinds)}`,
+      t(
+        "已生成 {0} 个几何体（{1}）· {2}",
+        geometries.length,
+        [kinds.has3d ? "3D" : null, kinds.has2d ? "2D" : null].filter(Boolean).join(" + "),
+        formatDims(info.size, kinds)
+      ),
       "ok"
     );
     return true;
   } catch (err) {
     setStatus(
-      err.line ? `代码执行出错（第 ${err.line} 行）` : "代码执行出错",
+      err.line ? t("代码执行出错（第 {0} 行）", err.line) : t("代码执行出错"),
       "error"
     );
     highlightErrorLine(err.line);
     if (quiet) return false;
     if (fromAI) {
       addErrorCard(
-        `模型代码执行出错：${err.message}`,
-        `执行报错：${err.message}\n请修复并输出完整代码。`
+        t("模型代码执行出错：{0}", err.message),
+        t("执行报错：{0}\n请修复并输出完整代码。", err.message)
       );
     } else {
-      addErrorCard(`代码执行出错：${err.message}`);
+      addErrorCard(t("代码执行出错：{0}", err.message));
     }
     return false;
   }
@@ -691,7 +696,7 @@ function applyAutoView(kinds) {
 
 function updateGridInfo(spacing) {
   const fmt = spacing >= 1 ? spacing.toString() : spacing.toFixed(1);
-  el.gridInfo.textContent = `网格 ${fmt} mm`;
+  el.gridInfo.textContent = t("网格 {0} mm", fmt);
 }
 
 // ---------- 画布工具栏 ----------
@@ -838,7 +843,7 @@ el.paramCollapse.addEventListener("click", () => {
 // ---------- 版本快照 ----------
 
 const MAX_VERSIONS = 20;
-const VERSION_SOURCE_LABELS = { ai: "AI", manual: "手动", load: "载入" };
+const VERSION_SOURCE_LABELS = { ai: "AI", manual: t("手动"), load: t("载入") };
 
 function pushVersion(code, source = "manual") {
   const last = state.versions[state.versions.length - 1];
@@ -883,7 +888,7 @@ el.codeArea.addEventListener("blur", () => {
 el.saveVersion.addEventListener("click", () => {
   pushVersion(el.codeArea.value, "manual");
   saveSession();
-  setStatus("已保存手动修改为版本快照", "ok");
+  setStatus(t("已保存手动修改为版本快照"), "ok");
 });
 
 el.dismissSave.addEventListener("click", () => {
@@ -899,7 +904,7 @@ el.versionSelect.addEventListener("change", () => {
   codeDirty = false;
   el.codeSaveHint.hidden = true;
   buildFromCode(v.code, { snapshot: false });
-  setStatus(`已回退到 V${Number(el.versionSelect.value) + 1}`, "ok");
+  setStatus(t("已回退到 V{0}", Number(el.versionSelect.value) + 1), "ok");
 });
 
 // ---------- 代码面板：行号 / 错误行 / 快捷键 ----------
@@ -921,7 +926,7 @@ function highlightErrorLine(line) {
   updateGutter();
   if (errorLine) {
     el.codePanel.classList.remove("collapsed");
-    el.codeToggle.textContent = "代码 ▾";
+    el.codeToggle.textContent = t("代码 ▾");
     // 把出错行滚动到可视范围
     const lineHeight = parseFloat(getComputedStyle(el.codeArea).lineHeight) || 18;
     el.codeArea.scrollTop = Math.max(0, (errorLine - 4) * lineHeight);
@@ -1010,9 +1015,9 @@ el.shareForm.addEventListener("submit", async (e) => {
       }),
     });
     const body = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(body.error || `发布失败（${resp.status}）`);
+    if (!resp.ok) throw new Error(body.error || t("发布失败（{0}）", resp.status));
     el.shareModal.hidden = true;
-    setStatus("已发布到作品市场", "ok");
+    setStatus(t("已发布到作品市场"), "ok");
   } catch (err) {
     el.shareError.textContent = err.message;
     el.shareError.hidden = false;
@@ -1031,9 +1036,9 @@ function loadPendingWork() {
     el.codeArea.value = code;
     updateGutter();
     el.codePanel.classList.remove("collapsed");
-    el.codeToggle.textContent = "代码 ▾";
+    el.codeToggle.textContent = t("代码 ▾");
     buildFromCode(code, { source: "load" });
-    addBubble("assistant", `已载入市场作品「${title}」，可以直接修改代码，或继续用对话改进它。`);
+    addBubble("assistant", t("已载入市场作品「{0}」，可以直接修改代码，或继续用对话改进它。", title));
   } catch {
     // 忽略损坏数据
   }
@@ -1044,7 +1049,7 @@ function loadPendingWork() {
 function deriveTitle() {
   const first = state.history.find((m) => m.role === "user");
   const text = first ? contentText(first.content).trim() : "";
-  return text ? text.slice(0, 40) : first ? "图片建模会话" : "未命名会话";
+  return text ? text.slice(0, 40) : first ? t("图片建模会话") : t("未命名会话");
 }
 
 async function saveSession() {
@@ -1067,11 +1072,11 @@ async function saveSession() {
 
 async function openHistoryModal() {
   el.historyModal.hidden = false;
-  el.historyList.innerHTML = '<div class="empty">加载中…</div>';
+  el.historyList.innerHTML = `<div class="empty">${t("加载中…")}</div>`;
   try {
     const sessions = await (await fetch("/api/sessions")).json();
     if (sessions.length === 0) {
-      el.historyList.innerHTML = '<div class="empty">还没有历史会话</div>';
+      el.historyList.innerHTML = `<div class="empty">${t("还没有历史会话")}</div>`;
       return;
     }
     el.historyList.innerHTML = "";
@@ -1079,7 +1084,7 @@ async function openHistoryModal() {
       el.historyList.appendChild(renderHistoryItem(s));
     }
   } catch {
-    el.historyList.innerHTML = '<div class="empty">加载失败</div>';
+    el.historyList.innerHTML = `<div class="empty">${t("加载失败")}</div>`;
   }
 }
 
@@ -1094,25 +1099,25 @@ function renderHistoryItem(s) {
   title.textContent = s.title;
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = `${formatTime(s.updatedAt)} · ${s.messageCount} 条消息${s.hasCode ? " · 含模型代码" : ""}`;
+  meta.textContent = `${formatTime(s.updatedAt)} · ${t("{0} 条消息", s.messageCount)}${s.hasCode ? t(" · 含模型代码") : ""}`;
   info.append(title, meta);
   info.addEventListener("click", () => loadSession(s.id));
 
   const loadBtn = document.createElement("button");
   loadBtn.className = "load-btn";
-  loadBtn.textContent = "载入";
+  loadBtn.textContent = t("载入");
   loadBtn.addEventListener("click", () => loadSession(s.id));
 
   const delBtn = document.createElement("button");
   delBtn.className = "del-btn";
-  delBtn.textContent = "删除";
+  delBtn.textContent = t("删除");
   delBtn.addEventListener("click", async () => {
-    if (!confirm(`删除会话「${s.title}」？`)) return;
+    if (!confirm(t("删除会话「{0}」？", s.title))) return;
     await fetch(`/api/sessions/${s.id}`, { method: "DELETE" });
     if (state.sessionId === s.id) state.sessionId = null;
     item.remove();
     if (!el.historyList.children.length) {
-      el.historyList.innerHTML = '<div class="empty">还没有历史会话</div>';
+      el.historyList.innerHTML = `<div class="empty">${t("还没有历史会话")}</div>`;
     }
   });
 
@@ -1129,7 +1134,7 @@ function formatTime(iso) {
 async function loadSession(id) {
   try {
     const resp = await fetch(`/api/sessions/${id}`);
-    if (!resp.ok) throw new Error("会话不存在");
+    if (!resp.ok) throw new Error(t("会话不存在"));
     const session = await resp.json();
 
     state.sessionId = session.id;
@@ -1156,10 +1161,10 @@ async function loadSession(id) {
       buildFromCode(session.code, { source: "load" });
     } else {
       el.versionSelect.hidden = true;
-      setStatus("已载入会话", "ok");
+      setStatus(t("已载入会话"), "ok");
     }
   } catch (err) {
-    setStatus(`载入失败：${err.message}`, "error");
+    setStatus(t("载入失败：{0}", err.message), "error");
   }
 }
 
@@ -1179,7 +1184,7 @@ async function openLocalFile(file) {
       updateGridInfo(info.gridSpacing);
       const fmt = (n) => (Math.round(n * 10) / 10).toString();
       setStatus(
-        `已打开 ${file.name}（查看模式，导出不可用）· ${fmt(info.size[0])} × ${fmt(info.size[1])} × ${fmt(info.size[2])} mm`,
+        `${t("已打开 {0}（查看模式，导出不可用）", file.name)} · ${fmt(info.size[0])} × ${fmt(info.size[1])} × ${fmt(info.size[2])} mm`,
         "ok"
       );
     } else if (name.endsWith(".js")) {
@@ -1187,15 +1192,15 @@ async function openLocalFile(file) {
       el.codeArea.value = code;
       updateGutter();
       el.codePanel.classList.remove("collapsed");
-      el.codeToggle.textContent = "代码 ▾";
+      el.codeToggle.textContent = t("代码 ▾");
       buildFromCode(code, { source: "load" });
     } else if (/\.(png|jpe?g|webp)$/.test(name)) {
       openCropModal(file);
     } else {
-      setStatus("不支持的文件类型，请选择 .stl / .js / 图片文件", "warn");
+      setStatus(t("不支持的文件类型，请选择 .stl / .js / 图片文件"), "warn");
     }
   } catch (err) {
-    setStatus(`打开文件失败：${err.message}`, "error");
+    setStatus(t("打开文件失败：{0}", err.message), "error");
   }
 }
 
@@ -1237,7 +1242,7 @@ function openCropModal(file) {
   };
   img.onerror = () => {
     URL.revokeObjectURL(url);
-    setStatus("图片加载失败", "error");
+    setStatus(t("图片加载失败"), "error");
   };
   img.src = url;
 }
@@ -1350,14 +1355,14 @@ el.cropSubmit.addEventListener("click", () => {
     el.cropError.textContent = msg;
     el.cropError.hidden = false;
   };
-  if (state.busy) return showError("正在生成中，请稍候再试");
+  if (state.busy) return showError(t("正在生成中，请稍候再试"));
   const dataUrl = cropSelectionToDataUrl(CROP_OUT_MAX);
-  if (!dataUrl) return showError("请先框选一个有效区域");
+  if (!dataUrl) return showError(t("请先框选一个有效区域"));
 
   const hint = el.cropHint.value.trim();
   const text = hint
-    ? `请根据这张图片建模。补充说明：${hint}`
-    : "请识别这张图片中的物体，生成对应的参数化模型（尺寸未知时自行估一个合理值并说明）。";
+    ? t("请根据这张图片建模。补充说明：{0}", hint)
+    : t("请识别这张图片中的物体，生成对应的参数化模型（尺寸未知时自行估一个合理值并说明）。");
 
   el.cropModal.hidden = true;
   sendTurn([
@@ -1370,7 +1375,7 @@ el.cropSubmit.addEventListener("click", () => {
 el.cropAnnotate.addEventListener("click", () => {
   const dataUrl = cropSelectionToDataUrl(1600);
   if (!dataUrl) {
-    el.cropError.textContent = "请先框选一个有效区域";
+    el.cropError.textContent = t("请先框选一个有效区域");
     el.cropError.hidden = false;
     return;
   }
@@ -1411,7 +1416,7 @@ function openAnnotateModal(src) {
     el.annotateError.hidden = true;
     el.annotateModal.hidden = false;
   };
-  img.onerror = () => setStatus("截图加载失败", "error");
+  img.onerror = () => setStatus(t("截图加载失败"), "error");
   img.src = src;
 }
 
@@ -1548,10 +1553,10 @@ el.annotateSubmit.addEventListener("click", () => {
     el.annotateError.textContent = msg;
     el.annotateError.hidden = false;
   };
-  if (state.busy) return showError("正在生成中，请稍候再试");
+  if (state.busy) return showError(t("正在生成中，请稍候再试"));
   const hint = el.annotateHint.value.trim();
   if (!annotate.shapes.length && !hint) {
-    return showError("请至少画一个标注，或填写文字说明");
+    return showError(t("请至少画一个标注，或填写文字说明"));
   }
 
   // 按原图尺寸合成标注（最长边 1024px）
@@ -1570,8 +1575,8 @@ el.annotateSubmit.addEventListener("click", () => {
   const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
 
   const text = hint
-    ? `这是当前模型的标注截图，标注指出需要调整的部位。要求：${hint}`
-    : "这是当前模型的标注截图，请根据标注（框/箭头/圈画）指出的部位调整模型，输出完整新代码。";
+    ? t("这是当前模型的标注截图，标注指出需要调整的部位。要求：{0}", hint)
+    : t("这是当前模型的标注截图，请根据标注（框/箭头/圈画）指出的部位调整模型，输出完整新代码。");
 
   el.annotateModal.hidden = true;
   sendTurn([
@@ -1637,15 +1642,15 @@ el.clearChat.addEventListener("click", () => {
   el.exportDxf.disabled = true;
   el.shareWork.disabled = true;
   el.screenshot.disabled = true;
-  setStatus("就绪");
-  addBubble("assistant", "已开启新会话。描述你想要的模型吧！");
+  setStatus(t("就绪"));
+  addBubble("assistant", t("已开启新会话。描述你想要的模型吧！"));
 });
 
 el.codeToggle.addEventListener("click", () => {
   el.codePanel.classList.toggle("collapsed");
   el.codeToggle.textContent = el.codePanel.classList.contains("collapsed")
-    ? "代码 ▴"
-    : "代码 ▾";
+    ? t("代码 ▴")
+    : t("代码 ▾");
 });
 
 el.runCode.addEventListener("click", () => {
@@ -1675,7 +1680,7 @@ el.screenshot.addEventListener("click", () => {
   a.href = viewer.screenshot();
   a.download = `magiccad-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`;
   a.click();
-  setStatus("已保存截图", "ok");
+  setStatus(t("已保存截图"), "ok");
 });
 
 el.exportStl.addEventListener("click", () => safeExport(() => exportSTL(state.geometries)));
@@ -1685,7 +1690,7 @@ el.exportDxf.addEventListener("click", () => safeExport(() => exportDXF(state.ge
 function safeExport(fn) {
   try {
     fn();
-    setStatus("已导出", "ok");
+    setStatus(t("已导出"), "ok");
   } catch (err) {
     setStatus(err.message, "error");
   }
@@ -1702,7 +1707,10 @@ function safeExport(fn) {
   updateGridInfo(viewer.gridSpacing);
   addBubble(
     "assistant",
-    `你好，${state.me.username}！用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。做出满意的作品后，可以「分享到市场」给大家。`
+    t(
+      "你好，{0}！用一句话描述你想要的 2D 图形或 3D 模型，我会生成可预览、可导出的参数化模型。做出满意的作品后，可以「分享到市场」给大家。",
+      state.me.username
+    )
   );
   loadPendingWork();
   resumeActiveJob(); // 若有上次关页前未完成的生成任务，自动续接
